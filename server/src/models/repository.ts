@@ -20,12 +20,18 @@ export interface Conversation {
   status: 'active' | 'paused' | 'escalated' | 'closed' | 'won' | 'lost';
   ai_enabled: number;
   assigned_agent: string | null;
+  assigned_agent_id: string | null;
   sentiment: string;
   escalation_reason: string | null;
   deal_stage: string;
   last_message_at: string;
   created_at: string;
   closed_at: string | null;
+}
+
+export interface RequestingAgent {
+  id: string;
+  role: string;
 }
 
 export interface Message {
@@ -46,15 +52,20 @@ export interface ConversationWithLead extends Conversation {
   message_count: number;
 }
 
-export function getAllConversations(): ConversationWithLead[] {
+export function getAllConversations(requester: RequestingAgent): ConversationWithLead[] {
+  const ownershipFilter = requester.role === 'admin'
+    ? ''
+    : 'WHERE c.assigned_agent_id = ? OR c.assigned_agent_id IS NULL';
+
   return db.prepare(`
     SELECT c.*, l.name as lead_name, l.phone as lead_phone, l.company as lead_company,
       (SELECT body FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_message,
       (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id) as message_count
     FROM conversations c
     JOIN leads l ON l.id = c.lead_id
+    ${ownershipFilter}
     ORDER BY c.last_message_at DESC
-  `).all() as ConversationWithLead[];
+  `).all(...(requester.role === 'admin' ? [] : [requester.id])) as ConversationWithLead[];
 }
 
 export function getConversationById(id: string): ConversationWithLead | undefined {
@@ -66,6 +77,11 @@ export function getConversationById(id: string): ConversationWithLead | undefine
     JOIN leads l ON l.id = c.lead_id
     WHERE c.id = ?
   `).get(id) as ConversationWithLead | undefined;
+}
+
+export function canAccessConversation(conversation: ConversationWithLead, requester: RequestingAgent): boolean {
+  if (requester.role === 'admin') return true;
+  return conversation.assigned_agent_id === null || conversation.assigned_agent_id === requester.id;
 }
 
 export function getMessages(conversationId: string): Message[] {
@@ -186,7 +202,15 @@ export interface LeadWithStatus extends Lead {
   status: string;
 }
 
-export function getAllLeads(): LeadWithStatus[] {
+export function getAllLeads(requester: RequestingAgent): LeadWithStatus[] {
+  const ownershipFilter = requester.role === 'admin'
+    ? ''
+    : `WHERE COALESCE(
+        (SELECT c.assigned_agent_id FROM conversations c WHERE c.lead_id = l.id ORDER BY c.created_at DESC LIMIT 1),
+        NULL
+      ) IS NULL
+      OR (SELECT c.assigned_agent_id FROM conversations c WHERE c.lead_id = l.id ORDER BY c.created_at DESC LIMIT 1) = ?`;
+
   return db.prepare(`
     SELECT l.*,
       COALESCE(
@@ -194,8 +218,9 @@ export function getAllLeads(): LeadWithStatus[] {
         'new'
       ) as status
     FROM leads l
+    ${ownershipFilter}
     ORDER BY l.created_at DESC
-  `).all() as LeadWithStatus[];
+  `).all(...(requester.role === 'admin' ? [] : [requester.id])) as LeadWithStatus[];
 }
 
 export function getLeadByPhone(phone: string): Lead | undefined {
@@ -219,6 +244,12 @@ export function updateLead(id: string, updates: Partial<Lead>) {
   fields.push("updated_at = datetime('now')");
   values.push(id);
   db.prepare(`UPDATE leads SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+}
+
+export function assignConversation(conversationId: string, agentId: string | null, agentName: string | null) {
+  db.prepare(`
+    UPDATE conversations SET assigned_agent_id = ?, assigned_agent = ? WHERE id = ?
+  `).run(agentId, agentName, conversationId);
 }
 
 export function getActiveConversationForLead(leadId: string): Conversation | undefined {

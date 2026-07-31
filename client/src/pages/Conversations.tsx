@@ -1,10 +1,10 @@
 import { useEffect, useState, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  Send, Pause, Play, Trophy, XCircle, Bot, User, MessageCircle, Phone, Search, X,
+  Send, Pause, Play, Trophy, XCircle, Bot, User, MessageCircle, Phone, Search, X, UserCheck,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { api, Conversation, Message } from '../api';
+import { api, Conversation, Message, Agent } from '../api';
 import StatusBadge from '../components/StatusBadge';
 import StatusSelector from '../components/StatusSelector';
 import SentimentBadge from '../components/SentimentBadge';
@@ -24,13 +24,19 @@ export default function Conversations({ refreshKey }: Props) {
   const [sending, setSending] = useState(false);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const [agents, setAgents] = useState<Agent[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const selectedId = searchParams.get('id');
+  const isAdmin = agent?.role === 'admin';
 
   useEffect(() => {
     api.getConversations().then(setConversations).finally(() => setLoading(false));
   }, [refreshKey]);
+
+  useEffect(() => {
+    if (isAdmin) api.getAgents().then(setAgents);
+  }, [isAdmin]);
 
   useEffect(() => {
     if (selectedId) {
@@ -93,6 +99,12 @@ export default function Conversations({ refreshKey }: Props) {
   const handleStatusChange = async (status: ConversationStatus) => {
     if (!selected || status === selected.status) return;
     await api.updateStatus(selected.id, status);
+    await refreshSelected(selected.id);
+  };
+
+  const handleAssign = async (agentId: string | null) => {
+    if (!selected) return;
+    await api.assignConversation(selected.id, agentId);
     await refreshSelected(selected.id);
   };
 
@@ -184,6 +196,11 @@ export default function Conversations({ refreshKey }: Props) {
               <div className="flex items-center gap-2 mt-1.5">
                 <SentimentBadge sentiment={c.sentiment} />
                 <span className="text-xs text-luxury-400">{c.message_count} msgs</span>
+                {c.assigned_agent_id ? (
+                  <span className="text-xs text-luxury-400 truncate">· {c.assigned_agent}</span>
+                ) : (
+                  <span className="text-xs text-gold-600 truncate">· Unclaimed</span>
+                )}
               </div>
             </button>
           )))}
@@ -209,6 +226,29 @@ export default function Conversations({ refreshKey }: Props) {
                 </div>
               </div>
               <div className="flex items-center gap-2 flex-wrap justify-end">
+                {isAdmin ? (
+                  <select
+                    value={selected.assigned_agent_id ?? ''}
+                    onChange={(e) => handleAssign(e.target.value || null)}
+                    className="input py-1.5 text-xs w-auto"
+                  >
+                    <option value="">Unassigned</option>
+                    {agents.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                ) : selected.assigned_agent_id === agent?.id ? (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <UserCheck className="w-3.5 h-3.5" /> Assigned to you
+                  </span>
+                ) : !selected.assigned_agent_id ? (
+                  <button
+                    onClick={() => handleAssign(agent!.id)}
+                    className="btn-secondary text-xs flex items-center gap-1.5 py-1.5"
+                  >
+                    <UserCheck className="w-3.5 h-3.5" /> Claim
+                  </button>
+                ) : null}
                 <StatusSelector
                   value={selected.status}
                   onChange={handleStatusChange}

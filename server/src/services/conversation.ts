@@ -9,6 +9,7 @@ import {
   getActiveConversationForLead,
   createConversation,
   updateLead,
+  assignConversation,
 } from '../models/repository.js';
 import { generateAIResponse, analyzeSentiment, getInitialOutreachMessage } from './ai.js';
 import { sendSMS } from './twilio.js';
@@ -111,7 +112,7 @@ export async function handleInboundSMS(phone: string, body: string, leadName?: s
   return { conversationId: conversation.id, aiResponded: true, escalated: aiResult.shouldEscalate };
 }
 
-export async function sendHumanReply(conversationId: string, body: string, agentName: string) {
+export async function sendHumanReply(conversationId: string, body: string, agentName: string, agentId?: string) {
   const conversation = getConversationById(conversationId);
   if (!conversation) throw new Error('Conversation not found');
 
@@ -124,6 +125,7 @@ export async function sendHumanReply(conversationId: string, body: string, agent
 
   updateConversation(conversationId, {
     assigned_agent: agentName,
+    assigned_agent_id: agentId ?? conversation.assigned_agent_id,
     last_message_at: new Date().toISOString(),
   });
 
@@ -136,7 +138,7 @@ export async function sendHumanReply(conversationId: string, body: string, agent
   return msg;
 }
 
-export async function pauseAI(conversationId: string, agentName: string) {
+export async function pauseAI(conversationId: string, agentName: string, agentId?: string) {
   const conversation = getConversationById(conversationId);
   if (!conversation) throw new Error('Conversation not found');
 
@@ -144,6 +146,7 @@ export async function pauseAI(conversationId: string, agentName: string) {
     ai_enabled: 0,
     status: 'paused',
     assigned_agent: agentName,
+    assigned_agent_id: agentId ?? conversation.assigned_agent_id,
   });
   logEvent('ai_paused', conversationId, conversation.lead_id, { agent: agentName });
   broadcast('conversation_updated', { conversationId });
@@ -153,6 +156,15 @@ export async function pauseAI(conversationId: string, agentName: string) {
     agentName,
   });
   await notifyInApp('takeover', 'Human Takeover', `${agentName} took over ${conversation.lead_name}`, conversationId, conversation.lead_id);
+}
+
+export async function assignConversationToAgent(conversationId: string, agentId: string | null, agentName: string | null) {
+  const conversation = getConversationById(conversationId);
+  if (!conversation) throw new Error('Conversation not found');
+
+  assignConversation(conversationId, agentId, agentName);
+  logEvent('conversation_assigned', conversationId, conversation.lead_id, { agent: agentName });
+  broadcast('conversation_updated', { conversationId });
 }
 
 export async function resumeAI(conversationId: string) {
@@ -279,4 +291,78 @@ export async function triggerNewLeadOutreach(
   await notifyInApp('outreach', 'Outreach Sent', `AI contacted ${name}`, conversation.id, lead.id);
 
   return { lead, conversation, message: msg };
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// A realistic lead reply script for the live demo. Only the lead's side is
+// scripted — every AI reply is generated fresh by the real model, so the
+// conversation genuinely plays out live rather than replaying canned text.
+const LIVE_DEMO_LEAD_TURNS = [
+  "Hi, thanks for reaching out! What exactly does your product do?",
+  "Interesting. What would that cost for a team our size?",
+  "That's reasonable. How long does it usually take to get set up?",
+  "Sounds good — can someone walk me through next steps?",
+];
+
+export async function runLiveDemoConversation(name: string, phone: string, company?: string) {
+  let lead = getLeadByPhone(phone);
+  if (!lead) {
+    lead = createLead({ name, phone, company, source: 'demo' });
+  }
+  const conversation = createConversation(lead.id);
+
+  const opener = getInitialOutreachMessage(name);
+  const openMsg = addMessage({ conversationId: conversation.id, direction: 'outbound', sender: 'ai', body: opener });
+  logEvent('outreach_sent', conversation.id, lead.id);
+  broadcast('message', { conversationId: conversation.id, message: openMsg });
+  broadcast('conversation_updated', { conversationId: conversation.id });
+  await notifyInApp('outreach', 'Live Demo Started', `AI contacted ${name}`, conversation.id, lead.id);
+
+  // Run the back-and-forth in the background so the API responds immediately —
+  // the frontend watches it unfold live via the existing WebSocket broadcasts.
+  (async () => {
+    for (const leadLine of LIVE_DEMO_LEAD_TURNS) {
+      await sleep(2200 + Math.random() * 1400);
+
+      const sentiment = analyzeSentiment(leadLine);
+      const inMsg = addMessage({ conversationId: conversation.id, direction: 'inbound', sender: 'lead', body: leadLine, sentiment });
+      updateConversation(conversation.id, { sentiment });
+      broadcast('message', { conversationId: conversation.id, message: inMsg });
+      broadcast('conversation_updated', { conversationId: conversation.id });
+
+      await sleep(1200 + Math.random() * 900);
+
+      const history = getMessages(conversation.id)
+        .filter((m) => m.sender === 'lead' || m.sender === 'ai')
+        .slice(-10)
+        .map((m) => ({ role: (m.sender === 'lead' ? 'user' : 'assistant') as 'user' | 'assistant', content: m.body }));
+
+      const aiResult = await generateAIResponse(history, leadLine);
+
+      if (aiResult.shouldEscalate) {
+        updateConversation(conversation.id, {
+          status: 'escalated',
+          ai_enabled: 0,
+          escalation_reason: aiResult.escalationReason ?? 'Auto-escalation',
+          assigned_agent: 'Pending Assignment',
+        });
+        const sysMsg = addMessage({ conversationId: conversation.id, direction: 'outbound', sender: 'system', body: aiResult.response });
+        logEvent('escalation', conversation.id, lead.id, { reason: aiResult.escalationReason });
+        broadcast('message', { conversationId: conversation.id, message: sysMsg });
+        broadcast('escalation', { conversationId: conversation.id, reason: aiResult.escalationReason });
+        broadcast('conversation_updated', { conversationId: conversation.id });
+        await notifyInApp('escalation', 'Escalation Required', `${name}: ${aiResult.escalationReason}`, conversation.id, lead.id);
+        return;
+      }
+
+      const outMsg = addMessage({ conversationId: conversation.id, direction: 'outbound', sender: 'ai', body: aiResult.response });
+      broadcast('message', { conversationId: conversation.id, message: outMsg });
+      broadcast('conversation_updated', { conversationId: conversation.id });
+    }
+  })();
+
+  return { lead, conversation };
 }

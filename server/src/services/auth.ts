@@ -38,6 +38,39 @@ export async function createAgent(email: string, name: string, password: string,
   return getAgentById(id)!;
 }
 
+export async function updateAgent(
+  id: string,
+  updates: { name?: string; email?: string; role?: string; password?: string }
+): Promise<Agent | null> {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+
+  if (updates.name) { fields.push('name = ?'); values.push(updates.name); }
+  if (updates.email) { fields.push('email = ?'); values.push(updates.email.toLowerCase()); }
+  if (updates.role) { fields.push('role = ?'); values.push(updates.role); }
+  if (updates.password) {
+    const hash = await bcrypt.hash(updates.password, 10);
+    fields.push('password_hash = ?');
+    values.push(hash);
+  }
+
+  if (fields.length === 0) return getAgentById(id) ?? null;
+  values.push(id);
+  db.prepare(`UPDATE agents SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  return getAgentById(id) ?? null;
+}
+
+export function countAdmins(): number {
+  const row = db.prepare("SELECT COUNT(*) as c FROM agents WHERE role = 'admin'").get() as { c: number };
+  return row.c;
+}
+
+export function deleteAgent(id: string) {
+  // Unclaim anything this agent owned so it's still visible/pickable by the team.
+  db.prepare('UPDATE conversations SET assigned_agent_id = NULL, assigned_agent = NULL WHERE assigned_agent_id = ?').run(id);
+  db.prepare('DELETE FROM agents WHERE id = ?').run(id);
+}
+
 export async function verifyPassword(email: string, password: string): Promise<Agent | null> {
   const agent = getAgentByEmail(email);
   if (!agent) return null;

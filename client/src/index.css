@@ -19,7 +19,36 @@
 
 @layer components {
   .card {
-    @apply bg-white/90 border border-luxury-200 rounded-2xl shadow-luxury backdrop-blur-sm;
+    @apply bg-white/90 border border-luxury-200 rounded-2xl shadow-luxury backdrop-blur-sm transition-shadow duration-300;
+  }
+
+  .card-lift:hover {
+    @apply shadow-luxury-lg border-luxury-300;
+  }
+
+  .icon-chip {
+    @apply w-9 h-9 rounded-xl flex items-center justify-center shrink-0;
+    background: linear-gradient(135deg, #FBF6EE 0%, #F5EBD9 100%);
+    border: 1px solid #E8D5B0;
+  }
+
+  .icon-chip svg {
+    @apply w-4 h-4 text-gold-600;
+  }
+
+  .section-label {
+    @apply text-[11px] font-semibold uppercase tracking-wider text-luxury-400 mb-1.5 block;
+  }
+
+  .status-dot-live {
+    @apply w-2 h-2 rounded-full bg-emerald-500 shrink-0;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+    animation: dot-pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes dot-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
   }
 
   .btn-primary {
@@ -44,7 +73,7 @@
   .input {
     @apply w-full px-3.5 py-2.5 bg-white border border-luxury-200 rounded-xl text-luxury-800
       placeholder-luxury-400 focus:outline-none focus:ring-2 focus:ring-gold-400/50
-      focus:border-gold-400 transition-shadow shadow-sm;
+      focus:border-gold-400 transition-all duration-150 shadow-sm hover:border-luxury-300;
   }
 
   .page-title {

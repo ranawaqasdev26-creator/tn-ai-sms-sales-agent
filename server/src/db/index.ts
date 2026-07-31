@@ -40,6 +40,7 @@ export function initDatabase() {
       status TEXT DEFAULT 'active',
       ai_enabled INTEGER DEFAULT 1,
       assigned_agent TEXT,
+      assigned_agent_id TEXT REFERENCES agents(id),
       sentiment TEXT DEFAULT 'neutral',
       escalation_reason TEXT,
       deal_stage TEXT DEFAULT 'qualifying',
@@ -93,6 +94,17 @@ export function initDatabase() {
 
     CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read);
   `);
+
+  migrateAssignedAgentId();
+}
+
+// Existing databases predate assigned_agent_id — add it if missing.
+function migrateAssignedAgentId() {
+  const columns = db.prepare(`PRAGMA table_info(conversations)`).all() as { name: string }[];
+  if (!columns.some((c) => c.name === 'assigned_agent_id')) {
+    db.exec(`ALTER TABLE conversations ADD COLUMN assigned_agent_id TEXT REFERENCES agents(id)`);
+  }
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_conversations_assigned_agent ON conversations(assigned_agent_id)`);
 }
 
 export function getSetting(key: string): string | null {

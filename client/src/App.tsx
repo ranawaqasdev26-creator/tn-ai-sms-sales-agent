@@ -1,7 +1,7 @@
 import { Routes, Route, NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, MessageSquare, BarChart3, Settings, Radio,
-  Bot, Zap, LogOut, User, Users, FileArchive,
+  Bot, Zap, LogOut, User, Users, FileArchive, CheckCircle2,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import Leads from './pages/Leads';
@@ -13,7 +13,8 @@ import Login from './pages/Login';
 import NotificationBell from './components/NotificationBell';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useAuth } from './context/AuthContext';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { api } from './api';
 
 const nav = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -28,12 +29,17 @@ function AppShell() {
   const location = useLocation();
   const { agent, logout } = useAuth();
   const [refreshKey, setRefreshKey] = useState(0);
+  const [demoMode, setDemoMode] = useState<boolean | null>(null);
 
   const handleWSEvent = useCallback(() => {
     setRefreshKey((k) => k + 1);
   }, []);
 
   const { connected } = useWebSocket(handleWSEvent);
+
+  useEffect(() => {
+    api.getSettings().then((s) => setDemoMode(s.integrations.demoMode)).catch(() => {});
+  }, [refreshKey]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-luxury-page">
@@ -77,10 +83,18 @@ function AppShell() {
               {connected ? 'Live' : 'Reconnecting...'}
             </span>
           </div>
-          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-gold-50 border border-gold-200">
-            <Zap className="w-4 h-4 text-gold-600 shrink-0" />
-            <span className="text-xs text-gold-700 font-medium">Demo Mode Active</span>
-          </div>
+          {demoMode !== false && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-gold-50 border border-gold-200">
+              <Zap className="w-4 h-4 text-gold-600 shrink-0" />
+              <span className="text-xs text-gold-700 font-medium">Demo Mode Active</span>
+            </div>
+          )}
+          {demoMode === false && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span className="text-xs text-emerald-700 font-medium">Live — Real AI Active</span>
+            </div>
+          )}
           <div className="flex items-center gap-2 px-3 py-2 text-sm text-luxury-600">
             <User className="w-4 h-4" />
             <span className="flex-1 truncate font-medium">{agent?.name}</span>

@@ -46,6 +46,7 @@ export interface Conversation {
   status: string;
   ai_enabled: number;
   assigned_agent: string | null;
+  assigned_agent_id: string | null;
   sentiment: string;
   escalation_reason: string | null;
   deal_stage: string;
@@ -131,6 +132,8 @@ export const api = {
     request(`/conversations/${id}/reopen`, { method: 'POST' }),
   updateStatus: (id: string, status: string) =>
     request(`/conversations/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
+  assignConversation: (id: string, agentId: string | null) =>
+    request(`/conversations/${id}/assign`, { method: 'POST', body: JSON.stringify({ agentId }) }),
   getAnalytics: () => request<Analytics>('/analytics'),
   getSettings: () => request<Settings>('/settings'),
   updateSettings: (settings: Record<string, string>) =>
@@ -141,10 +144,18 @@ export const api = {
   getAgents: () => request<Agent[]>('/agents'),
   createAgent: (data: { email: string; name: string; password: string; role?: string }) =>
     request<Agent>('/agents', { method: 'POST', body: JSON.stringify(data) }),
+  updateAgent: (id: string, data: { name?: string; email?: string; password?: string; role?: string }) =>
+    request<Agent>(`/agents/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteAgent: (id: string) => request(`/agents/${id}`, { method: 'DELETE' }),
   demoInboundSMS: (phone: string, body: string, leadName?: string) =>
     request('/demo/inbound-sms', { method: 'POST', body: JSON.stringify({ phone, body, leadName }) }),
   demoNewLead: (name: string, phone: string, email?: string, company?: string) =>
     request('/demo/new-lead', { method: 'POST', body: JSON.stringify({ name, phone, email, company }) }),
   demoSimulate: (data?: { name?: string; phone?: string; company?: string }) =>
     request('/demo/simulate-conversation', { method: 'POST', body: JSON.stringify(data || {}) }),
+  demoLiveConversation: (name: string, phone: string, company?: string) =>
+    request<{ lead: Lead; conversation: Conversation }>('/demo/live-conversation', {
+      method: 'POST',
+      body: JSON.stringify({ name, phone, company }),
+    }),
 };
