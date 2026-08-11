@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import {
   getAllConversations,
   getConversationById,
@@ -25,8 +26,10 @@ import {
   runLiveDemoConversation,
 } from '../services/conversation.js';
 import { getSetting, setSetting } from '../db/index.js';
-import { isTwilioConfigured } from '../services/twilio.js';
+import { isTwilioConfigured, validateTwilioSignature } from '../services/twilio.js';
 import { isZohoConfigured } from '../services/zoho.js';
+import { isMessagingConfigured, getActiveProviderName } from '../services/messaging/index.js';
+import { isEmailConfigured } from '../services/email.js';
 import {
   verifyPassword, signToken, getAllAgents, createAgent, updateAgent, deleteAgent, getAgentById, countAdmins,
 } from '../services/auth.js';
@@ -40,6 +43,24 @@ import {
 import { getSystemPrompt } from '../services/ai.js';
 
 const router = Router();
+
+// Tighter limits for the routes most worth protecting: login (brute-force)
+// and public webhooks (anyone on the internet can hit these).
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts, please try again later.' },
+});
+
+const webhookLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests.' },
+});
 
 // ── Public routes ──────────────────────────────────────────
 
@@ -64,7 +85,7 @@ router.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-router.post('/auth/login', async (req, res) => {
+router.post('/auth/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
   const agent = await verifyPassword(email, password);
@@ -78,7 +99,17 @@ router.get('/auth/me', authMiddleware, (req: AuthRequest, res) => {
 });
 
 // Twilio webhook (public — Twilio calls this)
-router.post('/webhooks/twilio/sms', async (req, res) => {
+router.post('/webhooks/twilio/sms', webhookLimiter, async (req, res) => {
+  // Only enforced once Twilio is actually configured — keeps demo/local dev
+  // working without an auth token, but rejects spoofed requests once it's live.
+  if (isTwilioConfigured()) {
+    const signature = req.header('X-Twilio-Signature') || '';
+    const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+    if (!validateTwilioSignature(signature, url, req.body)) {
+      return res.status(403).send('Invalid signature');
+    }
+  }
+
   const { From: phone, Body: body } = req.body;
   if (!phone || !body) return res.status(400).send('Missing From or Body');
   try {
@@ -90,8 +121,25 @@ router.post('/webhooks/twilio/sms', async (req, res) => {
   }
 });
 
+// iBluSend webhook (public — iBluSend calls this)
+// TODO: field names below (`from`/`text`) are placeholders — update once
+// iBluSend's real developer docs confirm their actual inbound payload shape.
+// TODO: also add signature/secret verification here once their docs specify
+// how to authenticate inbound webhook calls (mirror the Twilio pattern above).
+router.post('/webhooks/ibluesend/sms', webhookLimiter, async (req, res) => {
+  const { from: phone, text: body } = req.body;
+  if (!phone || !body) return res.status(400).json({ error: 'Missing from or text' });
+  try {
+    await handleInboundSMS(phone, body);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('iBluSend webhook error:', error);
+    res.status(500).json({ error: 'Error' });
+  }
+});
+
 // Zoho webhook (public — Zoho calls this)
-router.post('/webhooks/zoho/lead', async (req, res) => {
+router.post('/webhooks/zoho/lead', webhookLimiter, async (req, res) => {
   try {
     const { name, phone, email, company, zoho_id } = req.body;
     if (!name || !phone) return res.status(400).json({ error: 'name and phone required' });
@@ -199,9 +247,9 @@ router.post('/conversations/:id/resume', async (req, res) => {
 router.post('/conversations/:id/close', async (req, res) => {
   try {
     const id = String(req.params.id);
-    const { outcome } = req.body;
-    if (!['won', 'lost'].includes(outcome)) {
-      return res.status(400).json({ error: 'Outcome must be won or lost' });
+    const outcome = req.body?.outcome || 'closed';
+    if (!['won', 'lost', 'closed'].includes(outcome)) {
+      return res.status(400).json({ error: 'Outcome must be won, lost, or closed' });
     }
     await closeConversation(id, outcome);
     res.json({ success: true });
@@ -309,7 +357,9 @@ router.delete('/agents/:id', (req: AuthRequest, res) => {
 router.get('/settings', (_req, res) => {
   const keys = [
     'openai_api_key', 'openai_model', 'twilio_account_sid', 'twilio_auth_token',
-    'twilio_phone_number', 'zoho_client_id', 'zoho_client_secret', 'zoho_refresh_token',
+    'twilio_phone_number', 'ibluesend_api_key', 'ibluesend_api_base', 'messaging_provider',
+    'zoho_client_id', 'zoho_client_secret', 'zoho_refresh_token',
+    'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_from', 'escalation_notify_email',
     'demo_mode', 'bot_system_prompt', 'bot_products_catalog', 'bot_company_name',
     'bot_outreach_template', 'zoho_notify_on_conversation', 'zoho_notify_on_escalation',
   ];
@@ -317,7 +367,7 @@ router.get('/settings', (_req, res) => {
   for (const key of keys) {
     const val = getSetting(key);
     if (val) {
-      const sensitive = ['openai_api_key', 'twilio_auth_token', 'zoho_client_secret', 'zoho_refresh_token'];
+      const sensitive = ['openai_api_key', 'twilio_auth_token', 'ibluesend_api_key', 'zoho_client_secret', 'zoho_refresh_token', 'smtp_pass'];
       settings[key] = sensitive.includes(key)
         ? '••••••••' + val.slice(-4)
         : val;
@@ -331,7 +381,10 @@ router.get('/settings', (_req, res) => {
     integrations: {
       openai: !!(getSetting('openai_api_key') || process.env.OPENAI_API_KEY),
       twilio: isTwilioConfigured(),
+      ibluesend: isMessagingConfigured() && getActiveProviderName() === 'ibluesend',
+      activeMessagingProvider: getActiveProviderName(),
       zoho: isZohoConfigured(),
+      email: isEmailConfigured(),
       demoMode: getSetting('demo_mode') !== 'false' && process.env.DEMO_MODE !== 'false',
       aiPlatform: 'OpenAI',
       aiModel: getSetting('openai_model') || process.env.OPENAI_MODEL || 'gpt-4o-mini',
@@ -342,7 +395,9 @@ router.get('/settings', (_req, res) => {
 router.put('/settings', (req, res) => {
   const allowed = [
     'openai_api_key', 'openai_model', 'twilio_account_sid', 'twilio_auth_token',
-    'twilio_phone_number', 'zoho_client_id', 'zoho_client_secret', 'zoho_refresh_token',
+    'twilio_phone_number', 'ibluesend_api_key', 'ibluesend_api_base', 'messaging_provider',
+    'zoho_client_id', 'zoho_client_secret', 'zoho_refresh_token',
+    'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_from', 'escalation_notify_email',
     'zoho_api_domain', 'demo_mode', 'bot_system_prompt', 'bot_products_catalog',
     'bot_company_name', 'bot_outreach_template', 'zoho_notify_on_conversation', 'zoho_notify_on_escalation',
   ];

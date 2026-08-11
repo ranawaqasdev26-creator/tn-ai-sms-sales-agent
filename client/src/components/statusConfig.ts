@@ -1,11 +1,11 @@
 import {
-  Radio, AlertTriangle, Pause, Trophy, XCircle, Sparkles, type LucideIcon,
+  Radio, AlertTriangle, Pause, Trophy, XCircle, Sparkles, CheckCircle2, type LucideIcon,
 } from 'lucide-react';
 
-export type ConversationStatus = 'active' | 'escalated' | 'paused' | 'won' | 'lost';
+export type ConversationStatus = 'active' | 'escalated' | 'paused' | 'won' | 'lost' | 'closed';
 export type LeadStatus = ConversationStatus | 'new';
 
-export const STATUS_OPTIONS: ConversationStatus[] = ['active', 'escalated', 'paused', 'won', 'lost'];
+export const STATUS_OPTIONS: ConversationStatus[] = ['active', 'escalated', 'paused', 'won', 'lost', 'closed'];
 
 export const STATUS_CONFIG: Record<LeadStatus, {
   label: string;
@@ -76,6 +76,16 @@ export const STATUS_CONFIG: Record<LeadStatus, {
     ring: 'ring-red-400/40',
     hover: 'hover:bg-red-50',
     glow: 'shadow-[0_0_16px_rgba(239,68,68,0.15)]',
+  },
+  closed: {
+    label: 'Closed',
+    description: 'Conversation closed — no won/lost outcome recorded',
+    icon: CheckCircle2,
+    badge: 'bg-luxury-100 text-luxury-600 border-luxury-200',
+    dot: 'bg-luxury-400',
+    ring: 'ring-luxury-400/40',
+    hover: 'hover:bg-luxury-100',
+    glow: 'shadow-[0_0_16px_rgba(168,154,114,0.15)]',
   },
 };
 

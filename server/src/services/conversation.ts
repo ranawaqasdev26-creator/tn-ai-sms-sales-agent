@@ -12,9 +12,10 @@ import {
   assignConversation,
 } from '../models/repository.js';
 import { generateAIResponse, analyzeSentiment, getInitialOutreachMessage } from './ai.js';
-import { sendSMS } from './twilio.js';
+import { sendMessage } from './messaging/index.js';
 import { syncLeadToZoho, notifyZohoConversationEvent } from './zoho.js';
 import { createNotification } from './notifications.js';
+import { sendEscalationEmail } from './email.js';
 
 type BroadcastFn = (event: string, data: unknown) => void;
 
@@ -95,6 +96,7 @@ export async function handleInboundSMS(phone: string, body: string, leadName?: s
       reason: aiResult.escalationReason,
     });
     await notifyInApp('escalation', 'Escalation Required', `${lead.name}: ${aiResult.escalationReason}`, conversation.id, lead.id);
+    await sendEscalationEmail(lead.name, aiResult.escalationReason ?? 'Auto-escalation', conversation.id);
   }
 
   const outboundMsg = addMessage({
@@ -104,7 +106,7 @@ export async function handleInboundSMS(phone: string, body: string, leadName?: s
     body: aiResult.response,
   });
 
-  await sendSMS(phone, aiResult.response);
+  await sendMessage(phone, aiResult.response);
 
   broadcast('message', { conversationId: conversation.id, message: outboundMsg });
   broadcast('conversation_updated', { conversationId: conversation.id });
@@ -129,7 +131,7 @@ export async function sendHumanReply(conversationId: string, body: string, agent
     last_message_at: new Date().toISOString(),
   });
 
-  await sendSMS(conversation.lead_phone, body);
+  await sendMessage(conversation.lead_phone, body);
   logEvent('human_reply', conversationId, conversation.lead_id, { agent: agentName });
 
   broadcast('message', { conversationId, message: msg });
@@ -178,18 +180,20 @@ export async function resumeAI(conversationId: string) {
   broadcast('conversation_updated', { conversationId });
 }
 
-export async function closeConversation(conversationId: string, outcome: 'won' | 'lost') {
+export async function closeConversation(conversationId: string, outcome: 'won' | 'lost' | 'closed') {
   const conversation = getConversationById(conversationId);
   if (!conversation) throw new Error('Conversation not found');
+
+  const dealStage = outcome === 'won' ? 'closed_won' : outcome === 'lost' ? 'closed_lost' : 'closed';
 
   updateConversation(conversationId, {
     status: outcome,
     ai_enabled: 0,
     closed_at: new Date().toISOString(),
-    deal_stage: outcome === 'won' ? 'closed_won' : 'closed_lost',
+    deal_stage: dealStage,
   });
 
-  if (conversation.lead_id) {
+  if (conversation.lead_id && outcome !== 'closed') {
     await syncLeadToZoho(conversation.lead_id, {
       Lead_Status: outcome === 'won' ? 'Converted' : 'Lost',
       Deal_Stage: outcome === 'won' ? 'Closed Won' : 'Closed Lost',
@@ -199,7 +203,8 @@ export async function closeConversation(conversationId: string, outcome: 'won' |
     });
   }
 
-  logEvent(outcome === 'won' ? 'deal_won' : 'deal_lost', conversationId, conversation.lead_id);
+  const eventType = outcome === 'won' ? 'deal_won' : outcome === 'lost' ? 'deal_lost' : 'conversation_closed';
+  logEvent(eventType, conversationId, conversation.lead_id);
   broadcast('conversation_updated', { conversationId });
 }
 
@@ -225,10 +230,10 @@ export async function updateConversationStatus(
   status: string,
   agentName = 'Agent'
 ) {
-  const allowed = ['active', 'escalated', 'paused', 'won', 'lost'];
+  const allowed = ['active', 'escalated', 'paused', 'won', 'lost', 'closed'];
   if (!allowed.includes(status)) throw new Error('Invalid status');
 
-  if (status === 'won' || status === 'lost') {
+  if (status === 'won' || status === 'lost' || status === 'closed') {
     await closeConversation(conversationId, status);
     return;
   }
@@ -282,7 +287,7 @@ export async function triggerNewLeadOutreach(
     body: message,
   });
 
-  await sendSMS(phone, message);
+  await sendMessage(phone, message);
   logEvent('outreach_sent', conversation.id, lead.id);
   broadcast('message', { conversationId: conversation.id, message: msg });
   broadcast('conversation_updated', { conversationId: conversation.id });

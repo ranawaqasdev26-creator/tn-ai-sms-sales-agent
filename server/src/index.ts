@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import path from 'path';
@@ -17,12 +18,24 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || '3001', 10);
 
 const app = express();
+// Correct req.protocol/req.ip when running behind nginx (as on the AWS deployment).
+app.set('trust proxy', true);
 const server = createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 
 app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:3001'] }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Rate limiting — general ceiling on the whole API, tighter limits are applied
+// per-route inside api.ts for login and public webhooks.
+app.use('/api', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' },
+}));
 
 // API routes
 app.use('/api', apiRouter);

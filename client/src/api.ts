@@ -90,7 +90,10 @@ export interface Settings {
   integrations: {
     openai: boolean;
     twilio: boolean;
+    ibluesend: boolean;
+    activeMessagingProvider?: string;
     zoho: boolean;
+    email: boolean;
     demoMode: boolean;
     aiPlatform?: string;
     aiModel?: string;
@@ -126,7 +129,7 @@ export const api = {
   pauseAI: (id: string) =>
     request(`/conversations/${id}/pause`, { method: 'POST', body: JSON.stringify({}) }),
   resumeAI: (id: string) => request(`/conversations/${id}/resume`, { method: 'POST' }),
-  closeConversation: (id: string, outcome: 'won' | 'lost') =>
+  closeConversation: (id: string, outcome?: 'won' | 'lost' | 'closed') =>
     request(`/conversations/${id}/close`, { method: 'POST', body: JSON.stringify({ outcome }) }),
   reopenConversation: (id: string) =>
     request(`/conversations/${id}/reopen`, { method: 'POST' }),

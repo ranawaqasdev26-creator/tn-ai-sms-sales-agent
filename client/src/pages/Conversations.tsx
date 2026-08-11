@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  Send, Pause, Play, Trophy, XCircle, Bot, User, MessageCircle, Phone, Search, X, UserCheck,
+  Send, Pause, Play, Trophy, XCircle, Bot, User, MessageCircle, Phone, Search, X, UserCheck, CheckCircle2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { api, Conversation, Message, Agent } from '../api';
@@ -84,7 +84,7 @@ export default function Conversations({ refreshKey }: Props) {
     await refreshSelected(selected.id);
   };
 
-  const handleClose = async (outcome: 'won' | 'lost') => {
+  const handleClose = async (outcome?: 'won' | 'lost' | 'closed') => {
     if (!selected) return;
     await api.closeConversation(selected.id, outcome);
     await refreshSelected(selected.id);
@@ -108,7 +108,7 @@ export default function Conversations({ refreshKey }: Props) {
     await refreshSelected(selected.id);
   };
 
-  const filterOptions = ['all', 'active', 'escalated', 'paused', 'won', 'lost'] as const;
+  const filterOptions = ['all', 'active', 'escalated', 'paused', 'won', 'lost', 'closed'] as const;
 
   const filterCounts = filterOptions.reduce((acc, f) => {
     acc[f] = f === 'all' ? conversations.length : conversations.filter((c) => c.status === f).length;
@@ -127,7 +127,7 @@ export default function Conversations({ refreshKey }: Props) {
     );
   });
 
-  const isClosed = selected?.status === 'won' || selected?.status === 'lost';
+  const isClosed = selected?.status === 'won' || selected?.status === 'lost' || selected?.status === 'closed';
 
   if (loading) {
     return (
@@ -269,6 +269,13 @@ export default function Conversations({ refreshKey }: Props) {
                     </button>
                     <button onClick={() => handleClose('lost')} className="btn-danger text-xs flex items-center gap-1.5 py-1.5">
                       <XCircle className="w-3.5 h-3.5" /> Lost
+                    </button>
+                    <button
+                      onClick={() => handleClose('closed')}
+                      title="Close without recording a won/lost outcome"
+                      className="btn-secondary text-xs flex items-center gap-1.5 py-1.5"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Close
                     </button>
                   </>
                 )}

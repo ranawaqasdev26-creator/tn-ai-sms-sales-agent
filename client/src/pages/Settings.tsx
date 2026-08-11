@@ -129,7 +129,9 @@ export default function SettingsPage() {
 
   const integrations = [
     { name: 'OpenAI', key: 'openai', configured: settings.integrations.openai },
+    { name: 'iBluSend (texting)', key: 'ibluesend', configured: settings.integrations.ibluesend },
     { name: 'Zoho CRM', key: 'zoho', configured: settings.integrations.zoho },
+    { name: 'Escalation Email Alerts', key: 'email', configured: settings.integrations.email },
   ];
 
   return (
