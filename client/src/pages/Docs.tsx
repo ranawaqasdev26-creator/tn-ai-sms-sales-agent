@@ -126,8 +126,8 @@ const sections = [
         <div>
           <p className="font-medium text-luxury-900">D. Escalation</p>
           <p className="mt-1">
-            Upset merchant, explicit human request, STOP/opt-out, legal risk, or AI <code className="text-xs">[ESCALATE]</code> →
-            AI off, Zoho Task, bell + email. “Call me later” asks for time/number — does <em>not</em> auto-escalate.
+            Rare only: STOP/opt-out, explicit human/live-agent request, or legal/abusive language →
+            AI off, Zoho Task, bell + email. Rates, timing, docs, and “call me later” stay in SMS — do <em>not</em> auto-escalate.
           </p>
         </div>
         <div>
@@ -157,7 +157,7 @@ const sections = [
               ['Already with someone', 'Affirm shopping around; ask what goal wasn’t met'],
               ['Rates / terms', 'Depend on qualifying factors; push docs'],
               ['Never say', 'Guaranteed rates, approvals, amounts, timelines'],
-              ['Handoff', 'Upset merchant or questions too difficult for text'],
+              ['Handoff', 'Rare — STOP, explicit human request, or legal/abuse only'],
             ].map(([k, v]) => (
               <tr key={k} className="border-b border-luxury-50 align-top">
                 <td className="py-2 pr-4 font-medium whitespace-nowrap">{k}</td>
