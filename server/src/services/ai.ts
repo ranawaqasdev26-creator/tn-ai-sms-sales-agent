@@ -6,11 +6,13 @@ export const DEFAULT_OUTREACH_TEMPLATE =
 
 const DEFAULT_SYSTEM_PROMPT = `You are the AI texting assistant for Nationwide Advance (business financing / MCA / working capital). Leads already applied on the website and are pre-qualified from the form — do NOT run a full qualification checklist.
 
+CRITICAL RULE: You handle almost EVERYTHING yourself by SMS. Do NOT hand off to a specialist/human unless the rare cases below. Escalation should be rare. Never say "ask a specialist", "I'll have someone reach out", or "connect you with a team member" for normal sales questions.
+
 Your goals (in order):
 1. Warm thank-you / confirmation that you saw their application
-2. Handle objections using the approved replies below
+2. Answer questions and handle objections yourself using the approved replies below
 3. ALWAYS steer toward completing the application and uploading recent 4-month bank statements via the upload link
-4. Hand off to a human when the lead is upset or questions get too difficult
+4. Only hand off in the rare escalation cases listed below
 
 Tone: warm, professional, concise, natural iMessage/SMS. Keep most replies under ~300 characters. No markdown. No bullet lists.
 
@@ -20,7 +22,10 @@ Approved objection handling (adapt naturally, keep the meaning):
 - Not interested: "May I ask why you applied just now on our site if you were not interested? Has something steered you in a different direction?"
 - Call me later / call me: "Of course — what time works best, and is this the best number to reach you on?" (do NOT escalate just because they ask for a call)
 - Already working with someone: "Great — shopping around is always a smart business decision. Was there a specified goal that wasn't met with the other finance company?"
-- Rates / terms: "Our rates and terms depend on many qualifying factors, but what I can tell you is that we strive to deliver the best results in every aspect whether it comes to rate and term." Then gently push docs/application.
+- Rates / terms / how much / fees: "Our rates and terms depend on many qualifying factors, but what I can tell you is that we strive to deliver the best results in every aspect whether it comes to rate and term." Then gently push docs/application.
+- How fast / timeline: "Timing depends on qualifying factors and how quickly docs come in — fastest next step is the application plus your recent 4-month bank statements."
+- Bank statements / security / docs questions: Reassure briefly (secure process, needed for review) and send or offer the upload link. Do NOT escalate for docs questions.
+- Funding amount questions: Do not promise a specific approval amount. Say it depends on qualifying factors, then push docs/application.
 
 Never say / never promise:
 - Exact rates, guarantees, approvals, funding amounts, or timelines as guaranteed
@@ -31,14 +36,14 @@ Never say / never promise:
 
 Primary CTA every conversation should return to:
 - Send in the application + recent 4-month bank statements on the upload link
-- If an upload link is provided in your context, include it when they are ready
-- If no link is configured yet, ask them to reply YES and say a specialist will send the secure upload link right away
+- If an upload link is provided in your context, include it when they are ready or ask for it
+- If no link is configured yet, ask them to reply YES and you will send the secure upload link right away (YOU send it — do not say a specialist will send it)
 
-When to hand off (respond with exactly [ESCALATE]):
-- Merchant is getting upset / angry / frustrated
-- Questions become too complex for text (legal, underwriting edge cases, stacked positions detail, etc.)
-- Lead explicitly asks for a human / specialist (not just "call me later")
-- Compliance / legal threats
+When to hand off (respond with exactly [ESCALATE] — RARE only):
+- Merchant is clearly angry / abusive / threatening
+- Lead explicitly asks for a human / real person / live agent (not just "call me later")
+- Compliance / legal threats (lawyer, sue, attorney)
+- Do NOT escalate for: rates, fees, funding amount, timelines, bank statements, upload link, "busy later", competitor shopping, or normal sales objections
 
 Deal stages: new → engaged → docs_requested → negotiation → closed_won/closed_lost / escalated`;
 
@@ -60,9 +65,9 @@ export function getSystemPrompt(): string {
     prompt += `\n\nAdditional product info:\n${products}`;
   }
   if (uploadLink) {
-    prompt += `\n\nSecure upload link for application + 4-month bank statements:\n${uploadLink}\nShare this link when pushing docs.`;
+    prompt += `\n\nSecure upload link for application + 4-month bank statements:\n${uploadLink}\nShare this link yourself when pushing docs. Do not say a specialist will send it.`;
   } else {
-    prompt += `\n\nNo upload link is configured yet. When they are ready for docs, ask them to reply YES and say a specialist will text the secure upload link.`;
+    prompt += `\n\nNo upload link is configured yet. When they are ready for docs, ask them to reply YES and say YOU will send the secure upload link right away. Do not mention a specialist.`;
   }
   return prompt;
 }
@@ -76,9 +81,15 @@ const DEMO_RESPONSES: Record<string, string[]> = {
     "Our rates and terms depend on many qualifying factors, but we strive to deliver the best results on both. Ready to upload your recent 4-month bank statements so we can review?",
     "Happy to help on rates — they depend on qualifying factors. Best next step is the application plus your last 4 months of bank statements on the upload link.",
   ],
+  speed: [
+    "Timing depends on qualifying factors and how quickly docs come in. Fastest next step is the application plus your recent 4-month bank statements — want the upload link?",
+  ],
+  security: [
+    "Yes — we use a secure upload process for the application and statements. Ready for me to send the link?",
+  ],
   interest: [
     "Awesome — next step is the application and your recent 4-month bank statements on the upload link. Want me to send that now?",
-    "Perfect. Reply YES and I'll get you the secure upload link for the application and last 4 months of statements.",
+    "Perfect. Reply YES and I'll send the secure upload link for the application and last 4 months of statements.",
   ],
   not_interested: [
     "May I ask why you applied just now on our site if you were not interested? Has something steered you in a different direction?",
@@ -116,7 +127,7 @@ function getOpenAIKey(): string | null {
 
 export function analyzeSentiment(text: string): 'positive' | 'neutral' | 'negative' | 'frustrated' {
   const lower = text.toLowerCase();
-  if (/\b(angry|frustrated|terrible|awful|hate|worst|useless|scam|pissed|ridiculous)\b/.test(lower)) {
+  if (/\b(angry|frustrated|terrible|awful|hate|worst|useless|scam|pissed|ridiculous|idiot|stupid)\b/.test(lower)) {
     return 'frustrated';
   }
   if (/\b(stop|unsubscribe|leave me alone|don't (text|contact|message)|remove me)\b/.test(lower)) {
@@ -129,6 +140,7 @@ export function analyzeSentiment(text: string): 'positive' | 'neutral' | 'negati
   return 'neutral';
 }
 
+/** Rare escalation only — Keith: almost never hand off. */
 export function shouldEscalate(text: string, sentiment: string): { escalate: boolean; reason?: string } {
   const lower = text.toLowerCase();
 
@@ -137,9 +149,9 @@ export function shouldEscalate(text: string, sentiment: string): { escalate: boo
     return { escalate: true, reason: 'Lead opted out / STOP request' };
   }
 
-  // Explicit human request — NOT mere "call me later"
+  // Explicit human request only (not "call me later", not docs/rates questions)
   if (
-    /\b(speak|talk|connect me)\b.{0,40}\b(human|person|agent|manager|someone|rep|specialist|keith)\b/.test(lower) ||
+    /\b(speak|talk|connect me)\b.{0,40}\b(human|person|agent|manager|rep|specialist|keith)\b/.test(lower) ||
     /\b(real person|live (person|agent|human)|actual (person|human)|not a bot)\b/.test(lower) ||
     /\b(can i (get|have) (a )?(human|person|agent))\b/.test(lower) ||
     /\b(transfer me|hand ?off|get (me )?keith)\b/.test(lower)
@@ -147,8 +159,12 @@ export function shouldEscalate(text: string, sentiment: string): { escalate: boo
     return { escalate: true, reason: 'Lead requested human agent' };
   }
 
-  if (sentiment === 'frustrated') {
-    return { escalate: true, reason: 'Merchant upset / negative sentiment' };
+  // Only escalate frustration when clearly abusive / threatening — not mild negativity
+  if (
+    sentiment === 'frustrated' &&
+    /\b(hate you|scam|sue|lawyer|attorney|report you|fraud|steal|idiot|stupid)\b/.test(lower)
+  ) {
+    return { escalate: true, reason: 'Merchant abusive / threatening' };
   }
   if (/\b(lawyer|legal action|sue|complaint|report you|attorney)\b/.test(lower)) {
     return { escalate: true, reason: 'Legal/compliance concern' };
@@ -156,12 +172,19 @@ export function shouldEscalate(text: string, sentiment: string): { escalate: boo
   return { escalate: false };
 }
 
+function withUploadLink(base: string): string {
+  const upload = getSetting('bot_upload_link');
+  if (!upload) return base;
+  if (base.includes(upload)) return base;
+  return `${base} ${upload}`.trim();
+}
+
 function getDemoResponse(inboundText: string): string {
   const lower = inboundText.toLowerCase();
   if (shouldEscalate(inboundText, analyzeSentiment(inboundText)).escalate) {
     return DEMO_RESPONSES.escalate[0];
   }
-  if (/\b(call me|call later|later today|tomorrow|next week)\b/.test(lower)) {
+  if (/\b(call me|call later|later today|tomorrow|next week)\b/.test(lower) && !/\b(human|person|agent|specialist)\b/.test(lower)) {
     return DEMO_RESPONSES.call_later[0];
   }
   if (/\b(not interested)\b/.test(lower)) {
@@ -170,8 +193,21 @@ function getDemoResponse(inboundText: string): string {
   if (/\b(already (working|have)|other (company|lender|finance)|shopping around)\b/.test(lower)) {
     return DEMO_RESPONSES.competitor[0];
   }
-  if (/\b(price|cost|how much|pricing|expensive|budget|rate|factor|terms)\b/.test(lower)) {
-    return DEMO_RESPONSES.pricing[Math.floor(Math.random() * DEMO_RESPONSES.pricing.length)];
+  if (/\b(secure|security|safe|privacy|info secure)\b/.test(lower)) {
+    return withUploadLink(DEMO_RESPONSES.security[0]);
+  }
+  if (/\b(how fast|how long|timeline|when (can|will)|funded|funding speed)\b/.test(lower)) {
+    return withUploadLink(DEMO_RESPONSES.speed[0]);
+  }
+  if (/\b(price|cost|how much|pricing|expensive|budget|rate|fee|terms|fund)\b/.test(lower)) {
+    return withUploadLink(DEMO_RESPONSES.pricing[Math.floor(Math.random() * DEMO_RESPONSES.pricing.length)]);
+  }
+  if (/\b(bank statement|statements|upload|docs|documents|application)\b/.test(lower)) {
+    const upload = getSetting('bot_upload_link');
+    if (upload) {
+      return `Happy to help — here's the secure upload link for the application and your recent 4-month bank statements: ${upload}`;
+    }
+    return "Happy to help — reply YES and I'll send the secure upload link for the application and your recent 4-month bank statements.";
   }
   if (/\b(yes|interested|tell me more|sounds good|demo|trial|ready|send (it|the link))\b/.test(lower)) {
     const upload = getSetting('bot_upload_link');
@@ -180,7 +216,7 @@ function getDemoResponse(inboundText: string): string {
     }
     return DEMO_RESPONSES.interest[Math.floor(Math.random() * DEMO_RESPONSES.interest.length)];
   }
-  if (/\b(no|expensive|can't afford|not sure|maybe later|think about)\b/.test(lower)) {
+  if (/\b(no|expensive|can't afford|not sure|maybe later|think about|busy)\b/.test(lower)) {
     return DEMO_RESPONSES.objection[Math.floor(Math.random() * DEMO_RESPONSES.objection.length)];
   }
   if (/\b(hi|hello|hey|good morning|good afternoon)\b/.test(lower)) {
@@ -231,15 +267,26 @@ export async function generateAIResponse(
       temperature: 0.7,
     });
 
-    const response = completion.choices[0]?.message?.content || getDemoResponse(inboundText);
+    let response = completion.choices[0]?.message?.content || getDemoResponse(inboundText);
 
+    // Only honor [ESCALATE] when the inbound also matches rare hard rules
     if (response.includes('[ESCALATE]')) {
-      return {
-        response:
-          "Let me connect you with one of our team members who can help you better. They'll be in touch shortly!",
-        shouldEscalate: true,
-        escalationReason: 'AI determined escalation needed',
-      };
+      if (escalation.escalate) {
+        return {
+          response:
+            "Absolutely — I'll connect you with a Nationwide Advance specialist now. Someone from the team will follow up shortly!",
+          shouldEscalate: true,
+          escalationReason: escalation.reason || 'AI determined escalation needed',
+        };
+      }
+      // Model tried to escalate too early — keep handling in SMS
+      response = response.replace(/\[ESCALATE\]/gi, '').trim() || getDemoResponse(inboundText);
+    }
+
+    // Soft scrub specialist handoff language for normal replies
+    if (/\b(connect you with|have (a |our )?specialist|team member will (follow|reach|text|send))\b/i.test(response)
+      && !shouldEscalate(inboundText, sentiment).escalate) {
+      response = getDemoResponse(inboundText);
     }
 
     return { response, shouldEscalate: false };

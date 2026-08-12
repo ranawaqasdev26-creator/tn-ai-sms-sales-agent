@@ -43,6 +43,15 @@ function AppShell() {
     api.getSettings().then((s) => setDemoMode(s.integrations.demoMode)).catch(() => {});
   }, [refreshKey]);
 
+  // Vercel has no WebSocket — poll so Conversations/Dashboard update without manual refresh
+  useEffect(() => {
+    if (connected) return;
+    const id = window.setInterval(() => {
+      setRefreshKey((k) => k + 1);
+    }, 5000);
+    return () => window.clearInterval(id);
+  }, [connected]);
+
   return (
     <div className="flex h-screen overflow-hidden bg-luxury-page">
       <aside className="w-64 bg-luxury-sidebar border-r border-luxury-200 flex flex-col shrink-0 shadow-luxury">

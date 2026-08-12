@@ -162,8 +162,9 @@ export default function SettingsPage() {
           Bot Training
         </h3>
         <p className="text-sm text-luxury-500">
-          Nationwide sales script lives here. Login anytime, tweak the opener / objections / rules, hit Save —
-          the next AI reply uses your updates. Leads are pre-qualified on the form; AI should push app + 4-month bank statements.
+          Train the bot yourself here — edit System Prompt, Outreach opener, product notes, and upload link, then Save.
+          Next AI reply uses your updates. Keep escalation rare (STOP / explicit human request / legal only); the bot should
+          answer rates, timing, and docs questions itself and push app + 4-month bank statements.
         </p>
         <div>
           <label className="block text-sm text-luxury-500 mb-1">Company Name</label>

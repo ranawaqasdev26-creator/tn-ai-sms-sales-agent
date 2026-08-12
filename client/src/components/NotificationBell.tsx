@@ -50,7 +50,7 @@ export default function NotificationBell() {
     if ('Notification' in window && Notification.permission === 'default') {
       void Notification.requestPermission();
     }
-    const interval = setInterval(load, 15000);
+    const interval = setInterval(load, 5000);
     return () => clearInterval(interval);
   }, [load]);
 

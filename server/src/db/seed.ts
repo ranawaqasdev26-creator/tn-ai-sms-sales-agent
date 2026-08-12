@@ -1,8 +1,18 @@
 import { v4 as uuid } from 'uuid';
 import { db, getSetting, setSetting } from '../db/index.js';
 import { addMessage, logEvent } from '../models/repository.js';
+import { getDefaultSystemPrompt } from '../services/ai.js';
 
 const SEED_VERSION = '3-nationwide-mca';
+/** Bump when shipping a new default bot policy so stored prompts refresh once. */
+const PROMPT_VERSION = '4-rare-escalate-knowledgeable';
+
+function refreshPromptIfNeeded() {
+  if (getSetting('prompt_version') === PROMPT_VERSION) return;
+  setSetting('bot_system_prompt', getDefaultSystemPrompt());
+  setSetting('prompt_version', PROMPT_VERSION);
+  console.log(`Bot system prompt refreshed to ${PROMPT_VERSION}`);
+}
 
 type Script = {
   status: 'active' | 'paused' | 'escalated' | 'won';
@@ -271,7 +281,10 @@ export function seedDatabase() {
   const currentVersion = getSetting('seed_version');
   const leadCount = (db.prepare('SELECT COUNT(*) as c FROM leads').get() as { c: number }).c;
 
-  if (currentVersion === SEED_VERSION && leadCount > 0) return;
+  if (currentVersion === SEED_VERSION && leadCount > 0) {
+    refreshPromptIfNeeded();
+    return;
+  }
 
   if (leadCount > 0) {
     console.log('Refreshing demo seed data...');
@@ -298,7 +311,7 @@ export function seedDatabase() {
     );
   }
   setSetting('seed_version', SEED_VERSION);
-
+  refreshPromptIfNeeded();
 
   console.log(`Demo data seeded: ${DEMO_DATA.length} conversations (4 active, 4 escalated, 4 paused, 4 won).`);
 }
