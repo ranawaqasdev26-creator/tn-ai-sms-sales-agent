@@ -10,6 +10,7 @@ import {
   createConversation,
   updateLead,
   assignConversation,
+  normalizePhone,
 } from '../models/repository.js';
 import { generateAIResponse, analyzeSentiment, getInitialOutreachMessage } from './ai.js';
 import { sendOutboundMessage } from './messaging.js';
@@ -31,14 +32,19 @@ async function notifyInApp(type: string, title: string, body: string, conversati
 }
 
 export async function handleInboundSMS(phone: string, body: string, leadName?: string) {
-  let lead = getLeadByPhone(phone);
+  const normalizedPhone = normalizePhone(phone);
+  let lead = getLeadByPhone(normalizedPhone);
   if (!lead) {
     lead = createLead({
-      name: leadName || `Lead ${phone.slice(-4)}`,
-      phone,
+      name: leadName || `Lead ${String(normalizedPhone).slice(-4)}`,
+      phone: normalizedPhone,
       source: 'sms',
     });
-    logEvent('lead_created', undefined, lead.id, { phone, source: 'sms' });
+    logEvent('lead_created', undefined, lead.id, { phone: normalizedPhone, source: 'sms' });
+  } else if (leadName && leadName.trim() && lead.name !== leadName.trim()) {
+    // Keep the name the tester typed in the demo panel
+    updateLead(lead.id, { name: leadName.trim() });
+    lead = getLeadByPhone(normalizedPhone) || lead;
   }
 
   let conversation = getActiveConversationForLead(lead.id);
@@ -121,7 +127,7 @@ export async function handleInboundSMS(phone: string, body: string, leadName?: s
     body: aiResult.response,
   });
 
-  await sendOutboundMessage(phone, aiResult.response, {
+  await sendOutboundMessage(lead.phone, aiResult.response, {
     sendMode: 'instant',
     idempotencyKey: `ai_${conversation.id}_${inboundMsg.id}`,
   });
@@ -291,9 +297,10 @@ export async function triggerNewLeadOutreach(
   company?: string,
   zohoId?: string
 ) {
-  let lead = getLeadByPhone(phone);
+  const normalizedPhone = normalizePhone(phone);
+  let lead = getLeadByPhone(normalizedPhone);
   if (!lead) {
-    lead = createLead({ name, phone, email, company, source: 'zoho', zoho_id: zohoId });
+    lead = createLead({ name, phone: normalizedPhone, email, company, source: 'zoho', zoho_id: zohoId });
   } else {
     const patch: Record<string, string> = {};
     if (zohoId) patch.zoho_id = zohoId;
@@ -302,7 +309,7 @@ export async function triggerNewLeadOutreach(
     if (name) patch.name = name;
     if (Object.keys(patch).length) {
       updateLead(lead.id, patch);
-      lead = getLeadByPhone(phone)!;
+      lead = getLeadByPhone(normalizedPhone)!;
     }
   }
 
@@ -326,7 +333,7 @@ export async function triggerNewLeadOutreach(
     body: message,
   });
 
-  await sendOutboundMessage(phone, message, {
+  await sendOutboundMessage(normalizedPhone, message, {
     sendMode: 'instant',
     idempotencyKey: `outreach_${lead.id}_${conversation.id}`,
   });

@@ -9,6 +9,7 @@ import StatusBadge from '../components/StatusBadge';
 import StatusSelector from '../components/StatusSelector';
 import SentimentBadge from '../components/SentimentBadge';
 import type { ConversationStatus } from '../components/statusConfig';
+import { schedulePersistDemoState, withDemoPersistence } from '../demoPersist';
 
 interface Props {
   refreshKey: number;
@@ -58,13 +59,14 @@ export default function Conversations({ refreshKey }: Props) {
     setSelected(updated);
     const convos = await api.getConversations();
     setConversations(convos);
+    schedulePersistDemoState();
   };
 
   const handleReply = async () => {
     if (!selected || !reply.trim()) return;
     setSending(true);
     try {
-      await api.reply(selected.id, reply);
+      await withDemoPersistence(() => api.reply(selected.id, reply));
       await refreshSelected(selected.id);
       setReply('');
     } finally {
@@ -74,31 +76,31 @@ export default function Conversations({ refreshKey }: Props) {
 
   const handlePause = async () => {
     if (!selected) return;
-    await api.pauseAI(selected.id);
+    await withDemoPersistence(() => api.pauseAI(selected.id));
     await refreshSelected(selected.id);
   };
 
   const handleResume = async () => {
     if (!selected) return;
-    await api.resumeAI(selected.id);
+    await withDemoPersistence(() => api.resumeAI(selected.id));
     await refreshSelected(selected.id);
   };
 
   const handleClose = async (outcome?: 'won' | 'lost' | 'closed') => {
     if (!selected) return;
-    await api.closeConversation(selected.id, outcome);
+    await withDemoPersistence(() => api.closeConversation(selected.id, outcome));
     await refreshSelected(selected.id);
   };
 
   const handleReopen = async () => {
     if (!selected) return;
-    await api.reopenConversation(selected.id);
+    await withDemoPersistence(() => api.reopenConversation(selected.id));
     await refreshSelected(selected.id);
   };
 
   const handleStatusChange = async (status: ConversationStatus) => {
     if (!selected || status === selected.status) return;
-    await api.updateStatus(selected.id, status);
+    await withDemoPersistence(() => api.updateStatus(selected.id, status));
     await refreshSelected(selected.id);
   };
 

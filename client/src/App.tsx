@@ -131,9 +131,9 @@ function AppShell() {
 }
 
 export default function App() {
-  const { agent, loading } = useAuth();
+  const { agent, loading, demoReady } = useAuth();
 
-  if (loading) {
+  if (loading || (agent && !demoReady)) {
     return (
       <div className="min-h-screen bg-luxury-page flex items-center justify-center">
         <div className="animate-spin w-8 h-8 border-2 border-gold-500 border-t-transparent rounded-full" />

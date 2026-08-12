@@ -46,6 +46,7 @@ import {
 } from '../services/notifications.js';
 import { getSystemPrompt, getDefaultSystemPrompt, DEFAULT_OUTREACH_TEMPLATE } from '../services/ai.js';
 import { getLastEscalationEmail } from '../services/email.js';
+import { exportDemoState, importDemoState, type DemoStateSnapshot } from '../services/demoState.js';
 
 
 const processedWebhookEvents = new Set<string>();
@@ -511,6 +512,161 @@ router.put('/settings', (req, res) => {
   res.json({ success: true });
 });
 
+
+// Demo state backup (browser localStorage ↔ server) for Vercel ephemeral SQLite testing
+router.get('/demo/state', (_req, res) => {
+  res.json(exportDemoState());
+});
+
+router.post('/demo/state', (req, res) => {
+  try {
+    const result = importDemoState(req.body as DemoStateSnapshot);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Import failed' });
+  }
+});
+
+/**
+ * Single-invocation demo runner: import browser snapshot → run action → export snapshot.
+ * Required on Vercel because each /api call can hit a different ephemeral SQLite instance.
+ */
+router.post('/demo/run', async (req: AuthRequest, res) => {
+  try {
+    const { snapshot, action, payload = {} } = req.body as {
+      snapshot?: DemoStateSnapshot | null;
+      action: string;
+      payload?: Record<string, unknown>;
+    };
+    if (!action || typeof action !== 'string') {
+      return res.status(400).json({ error: 'action required' });
+    }
+    if (snapshot && snapshot.version === 1) {
+      importDemoState(snapshot);
+    }
+
+    const agentName = req.agent?.name || 'Agent';
+    let result: unknown;
+    switch (action) {
+      case 'get-leads':
+        result = getAllLeads();
+        break;
+      case 'get-conversations':
+        result = getAllConversations();
+        break;
+      case 'get-conversation': {
+        const id = String(payload.id || '');
+        const conversation = getConversationById(id);
+        if (!conversation) return res.status(404).json({ error: 'Not found' });
+        result = { ...conversation, messages: getMessages(id) };
+        break;
+      }
+      case 'get-analytics':
+        result = getAnalytics();
+        break;
+      case 'get-notifications':
+        result = { notifications: getAllNotifications(), unreadCount: getUnreadCount() };
+        break;
+      case 'new-lead': {
+        const name = String(payload.name || '');
+        const phone = String(payload.phone || '');
+        if (!name || !phone) return res.status(400).json({ error: 'name and phone required' });
+        result = await triggerNewLeadOutreach(
+          name,
+          phone,
+          payload.email ? String(payload.email) : undefined,
+          payload.company ? String(payload.company) : undefined,
+        );
+        break;
+      }
+      case 'inbound-sms': {
+        const phone = String(payload.phone || '');
+        const body = String(payload.body || '');
+        if (!phone || !body) return res.status(400).json({ error: 'phone and body required' });
+        result = await handleInboundSMS(
+          phone,
+          body,
+          payload.leadName ? String(payload.leadName) : undefined,
+        );
+        break;
+      }
+      case 'simulate': {
+        const lead = createLead({
+          name: String(payload.name || 'Demo Lead'),
+          phone: String(payload.phone || `+1555${Math.floor(1000000 + Math.random() * 9000000)}`),
+          email: payload.email ? String(payload.email) : undefined,
+          company: String(payload.company || 'Demo Corp'),
+          source: 'demo',
+        });
+        const conversation = createConversation(lead.id);
+        const script = [
+          { sender: 'ai' as const, body: `Hi ${lead.name.split(' ')[0]}! This is Nationwide Advance — are you still looking for business funding?` },
+          { sender: 'lead' as const, body: 'Yes, we need working capital for inventory.' },
+          { sender: 'ai' as const, body: 'Got it. What type of business do you run, and roughly how much monthly revenue?' },
+          { sender: 'lead' as const, body: 'Retail store, about $40k a month. Looking for around $25k.' },
+          { sender: 'ai' as const, body: 'Thanks — that helps. How long have you been in business?' },
+          { sender: 'lead' as const, body: 'Can I speak to someone about approval odds?' },
+        ];
+        for (const msg of script) {
+          addMessage({
+            conversationId: conversation.id,
+            direction: msg.sender === 'lead' ? 'inbound' : 'outbound',
+            sender: msg.sender,
+            body: msg.body,
+            sentiment: msg.sender === 'lead' ? 'positive' : undefined,
+          });
+        }
+        updateConversation(conversation.id, {
+          status: 'escalated',
+          ai_enabled: 0,
+          escalation_reason: 'Lead requested human agent',
+          assigned_agent: 'Pending Assignment',
+          sentiment: 'positive',
+          deal_stage: 'negotiation',
+        });
+        logEvent('demo_created', conversation.id, lead.id);
+        result = { lead, conversationId: conversation.id };
+        break;
+      }
+      case 'reply': {
+        const id = String(payload.id || '');
+        const body = String(payload.body || '');
+        if (!id || !body) return res.status(400).json({ error: 'id and body required' });
+        result = await sendHumanReply(id, body, agentName);
+        break;
+      }
+      case 'pause-ai':
+        await pauseAI(String(payload.id || ''), agentName);
+        result = { success: true };
+        break;
+      case 'resume-ai':
+        await resumeAI(String(payload.id || ''));
+        result = { success: true };
+        break;
+      case 'close':
+        await closeConversation(String(payload.id || ''), payload.outcome === 'lost' ? 'lost' : 'won');
+        result = { success: true };
+        break;
+      case 'reopen':
+        await reopenConversation(String(payload.id || ''));
+        result = { success: true };
+        break;
+      case 'update-status':
+        await updateConversationStatus(String(payload.id || ''), String(payload.status || ''), agentName);
+        result = { success: true };
+        break;
+      case 'export':
+        result = exportDemoState();
+        break;
+      default:
+        return res.status(400).json({ error: `Unknown action: ${action}` });
+    }
+
+    res.json({ result, snapshot: exportDemoState() });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Demo run failed' });
+  }
+});
 
 // Demo endpoints (protected — agents only)
 router.post('/demo/inbound-sms', async (req, res) => {

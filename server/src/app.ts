@@ -27,6 +27,7 @@ app.use(cors({
 }));
 
 app.use(express.json({
+  limit: '8mb',
   verify: (req, _res, buf) => {
     (req as express.Request & { rawBody?: Buffer }).rawBody = buf;
   },

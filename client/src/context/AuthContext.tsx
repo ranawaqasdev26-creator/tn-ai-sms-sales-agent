@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
+import { restoreDemoStateFromLocalStorage } from '../demoPersist';
 
 export interface Agent {
   id: string;
@@ -15,6 +16,8 @@ interface AuthContextType {
   enterSession: (token: string, agent: Agent) => void;
   logout: () => void;
   loading: boolean;
+  /** True after localStorage demo state has been restored into the server (or skipped). */
+  demoReady: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -23,31 +26,66 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [token, setToken] = useState<string | null>(localStorage.getItem('sales_agent_token'));
   const [loading, setLoading] = useState(true);
+  const [demoReady, setDemoReady] = useState(false);
 
   useEffect(() => {
     if (!token) {
       setLoading(false);
+      setDemoReady(false);
       return;
     }
     let cancelled = false;
-    fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((data) => {
-        if (!cancelled) setAgent(data.agent);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        // Keep session if login already hydrated agent (cold-start /me race).
+    (async () => {
+      let sessionOk = false;
+      try {
+        const r = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
+        if (r.ok) {
+          const data = await r.json();
+          if (cancelled) return;
+          setAgent(data.agent);
+          sessionOk = true;
+        } else {
+          // Keep session if login already hydrated agent (cold-start /me race).
+          setAgent((current) => {
+            if (current) {
+              sessionOk = true;
+              return current;
+            }
+            localStorage.removeItem('sales_agent_token');
+            setToken(null);
+            return null;
+          });
+        }
+      } catch {
         setAgent((current) => {
-          if (current) return current;
+          if (current) {
+            sessionOk = true;
+            return current;
+          }
           localStorage.removeItem('sales_agent_token');
           setToken(null);
           return null;
         });
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+      }
+
+      if (cancelled) return;
+
+      if (sessionOk) {
+        // Do NOT export/persist here — a separate serverless instance can return seed
+        // data and wipe the browser backup (names/messages change on refresh).
+        // Page loads use /demo/run which imports localStorage atomically per request.
+        try {
+          await restoreDemoStateFromLocalStorage();
+        } catch (err) {
+          console.warn('[demo-persist] restore failed', err);
+        }
+        if (!cancelled) setDemoReady(true);
+      } else {
+        setDemoReady(false);
+      }
+
+      if (!cancelled) setLoading(false);
+    })();
     return () => {
       cancelled = true;
     };
@@ -57,6 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const onExpired = () => {
       setToken(null);
       setAgent(null);
+      setDemoReady(false);
     };
     window.addEventListener('sales-agent-auth-expired', onExpired);
     return () => window.removeEventListener('sales-agent-auth-expired', onExpired);
@@ -78,6 +117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const enterSession = (nextToken: string, nextAgent: Agent) => {
     localStorage.setItem('sales_agent_token', nextToken);
+    setDemoReady(false);
     setToken(nextToken);
     setAgent(nextAgent);
   };
@@ -86,10 +126,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem('sales_agent_token');
     setToken(null);
     setAgent(null);
+    setDemoReady(false);
   };
 
   return (
-    <AuthContext.Provider value={{ agent, token, login, enterSession, logout, loading }}>
+    <AuthContext.Provider value={{ agent, token, login, enterSession, logout, loading, demoReady }}>
       {children}
     </AuthContext.Provider>
   );

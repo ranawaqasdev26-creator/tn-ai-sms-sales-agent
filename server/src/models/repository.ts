@@ -90,10 +90,11 @@ export function getMessages(conversationId: string): Message[] {
 
 export function createLead(data: { name: string; phone: string; email?: string; company?: string; zoho_id?: string; source?: string }): Lead {
   const id = uuid();
+  const phone = normalizePhone(data.phone);
   db.prepare(`
     INSERT INTO leads (id, name, phone, email, company, zoho_id, source)
     VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, data.name, data.phone, data.email ?? null, data.company ?? null, data.zoho_id ?? null, data.source ?? 'manual');
+  `).run(id, data.name, phone, data.email ?? null, data.company ?? null, data.zoho_id ?? null, data.source ?? 'manual');
   return db.prepare('SELECT * FROM leads WHERE id = ?').get(id) as unknown as Lead;
 }
 
@@ -223,8 +224,26 @@ export function getAllLeads(requester: RequestingAgent): LeadWithStatus[] {
   `).all(...(requester.role === 'admin' ? [] : [requester.id])) as unknown as LeadWithStatus[];
 }
 
+export function normalizePhone(phone: string): string {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  if (String(phone).startsWith('+') && digits.length >= 10) return `+${digits}`;
+  return String(phone || '').trim();
+}
+
 export function getLeadByPhone(phone: string): Lead | undefined {
-  return db.prepare('SELECT * FROM leads WHERE phone = ?').get(phone) as unknown as Lead | undefined;
+  const normalized = normalizePhone(phone);
+  const exact = db.prepare('SELECT * FROM leads WHERE phone = ?').get(phone) as unknown as Lead | undefined;
+  if (exact) return exact;
+  if (normalized && normalized !== phone) {
+    const byNorm = db.prepare('SELECT * FROM leads WHERE phone = ?').get(normalized) as unknown as Lead | undefined;
+    if (byNorm) return byNorm;
+  }
+  // Last resort: match on digits only (handles formatting drift in demo testing)
+  const rows = db.prepare('SELECT * FROM leads').all() as unknown as Lead[];
+  const want = normalized.replace(/\D/g, '');
+  return rows.find((row) => normalizePhone(row.phone).replace(/\D/g, '') === want);
 }
 
 export function getLeadById(id: string): Lead | undefined {

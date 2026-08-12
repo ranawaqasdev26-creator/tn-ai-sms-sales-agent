@@ -1,7 +1,50 @@
 const API_BASE = '/api';
+const DEMO_STORAGE_KEY = 'nationwide_sms_demo_state_v1';
+
+export interface DemoStateSnapshot {
+  version: 1;
+  savedAt: string;
+  leads: Record<string, unknown>[];
+  conversations: Record<string, unknown>[];
+  messages: Record<string, unknown>[];
+  notifications: Record<string, unknown>[];
+  analytics_events: Record<string, unknown>[];
+}
 
 function getToken(): string | null {
   return localStorage.getItem('sales_agent_token');
+}
+
+function readDemoSnapshot(): DemoStateSnapshot | null {
+  try {
+    const raw = localStorage.getItem(DEMO_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as DemoStateSnapshot;
+    return parsed?.version === 1 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function snapshotScore(snapshot: DemoStateSnapshot): number {
+  return (
+    (snapshot.messages?.length || 0) * 10_000 +
+    (snapshot.conversations?.length || 0) * 100 +
+    (snapshot.leads?.length || 0)
+  );
+}
+
+/** Never let a stale/poorer snapshot wipe newer demo data (multi-tab / polling race). */
+function writeDemoSnapshotSafe(snapshot: DemoStateSnapshot, { force = false }: { force?: boolean } = {}) {
+  const current = readDemoSnapshot();
+  if (!force && current && snapshotScore(snapshot) < snapshotScore(current)) {
+    console.warn('[demo-persist] ignored stale snapshot overwrite', {
+      incoming: snapshotScore(snapshot),
+      kept: snapshotScore(current),
+    });
+    return;
+  }
+  localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(snapshot));
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -15,8 +58,6 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
   });
   if (res.status === 401) {
-    // Clear session once — do not hard-reload (that caused a login loop on Vercel
-    // when ephemeral SQLite briefly rejected a still-valid JWT across instances).
     const hadToken = !!localStorage.getItem('sales_agent_token');
     localStorage.removeItem('sales_agent_token');
     if (hadToken) {
@@ -29,6 +70,52 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     throw new Error(err.error || 'Request failed');
   }
   return res.json();
+}
+
+const READ_ACTIONS = new Set([
+  'get-leads',
+  'get-conversations',
+  'get-conversation',
+  'get-analytics',
+  'get-notifications',
+  'export',
+]);
+
+let demoRunChain: Promise<unknown> = Promise.resolve();
+
+/** Atomic import → action → export so Vercel multi-instance SQLite cannot drop demo data. */
+async function demoRun<T>(action: string, payload?: Record<string, unknown>): Promise<T> {
+  const run = async (): Promise<T> => {
+    const existing = readDemoSnapshot();
+    const data = await request<{ result: T; snapshot: DemoStateSnapshot }>('/demo/run', {
+      method: 'POST',
+      body: JSON.stringify({
+        snapshot: existing,
+        action,
+        payload: payload || {},
+      }),
+    });
+
+    if (data.snapshot) {
+      const isRead = READ_ACTIONS.has(action);
+      // Reads only bootstrap localStorage when empty — never clobber richer state.
+      // Mutations always try to save, but still reject poorer/stale snapshots.
+      if (!isRead || !existing) {
+        writeDemoSnapshotSafe(data.snapshot, { force: !isRead && !existing });
+      } else if (snapshotScore(data.snapshot) > snapshotScore(existing)) {
+        writeDemoSnapshotSafe(data.snapshot);
+      }
+    }
+
+    return data.result;
+  };
+
+  const next = demoRunChain.then(run, run);
+  demoRunChain = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
 }
 
 export interface Lead {
@@ -103,7 +190,6 @@ export interface Settings {
     aiModel?: string;
     messaging?: string;
   };
-
 }
 
 export interface AppNotification {
@@ -125,29 +211,26 @@ export interface Agent {
 }
 
 export const api = {
-  getLeads: () => request<Lead[]>('/leads'),
+  getLeads: () => demoRun<Lead[]>('get-leads'),
   createLead: (data: { name: string; phone: string; email?: string; company?: string }) =>
     request<Lead>('/leads', { method: 'POST', body: JSON.stringify(data) }),
-  getConversations: () => request<Conversation[]>('/conversations'),
-  getConversation: (id: string) => request<Conversation & { messages: Message[] }>(`/conversations/${id}`),
-  reply: (id: string, body: string) =>
-    request<Message>(`/conversations/${id}/reply`, { method: 'POST', body: JSON.stringify({ body }) }),
-  pauseAI: (id: string) =>
-    request(`/conversations/${id}/pause`, { method: 'POST', body: JSON.stringify({}) }),
-  resumeAI: (id: string) => request(`/conversations/${id}/resume`, { method: 'POST' }),
+  getConversations: () => demoRun<Conversation[]>('get-conversations'),
+  getConversation: (id: string) => demoRun<Conversation & { messages: Message[] }>('get-conversation', { id }),
+  reply: (id: string, body: string) => demoRun<Message>('reply', { id, body }),
+  pauseAI: (id: string) => demoRun('pause-ai', { id }),
+  resumeAI: (id: string) => demoRun('resume-ai', { id }),
   closeConversation: (id: string, outcome?: 'won' | 'lost' | 'closed') =>
-    request(`/conversations/${id}/close`, { method: 'POST', body: JSON.stringify({ outcome }) }),
-  reopenConversation: (id: string) =>
-    request(`/conversations/${id}/reopen`, { method: 'POST' }),
-  updateStatus: (id: string, status: string) =>
-    request(`/conversations/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
+    demoRun('close', { id, outcome }),
+  reopenConversation: (id: string) => demoRun('reopen', { id }),
+  updateStatus: (id: string, status: string) => demoRun('update-status', { id, status }),
   assignConversation: (id: string, agentId: string | null) =>
     request(`/conversations/${id}/assign`, { method: 'POST', body: JSON.stringify({ agentId }) }),
-  getAnalytics: () => request<Analytics>('/analytics'),
+  getAnalytics: () => demoRun<Analytics>('get-analytics'),
   getSettings: () => request<Settings>('/settings'),
   updateSettings: (settings: Record<string, string>) =>
     request('/settings', { method: 'PUT', body: JSON.stringify(settings) }),
-  getNotifications: () => request<{ notifications: AppNotification[]; unreadCount: number }>('/notifications'),
+  getNotifications: () =>
+    demoRun<{ notifications: AppNotification[]; unreadCount: number }>('get-notifications'),
   markNotificationRead: (id: string) => request(`/notifications/${id}/read`, { method: 'POST' }),
   markAllNotificationsRead: () => request('/notifications/read-all', { method: 'POST' }),
   getAgents: () => request<Agent[]>('/agents'),
@@ -157,14 +240,20 @@ export const api = {
     request<Agent>(`/agents/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteAgent: (id: string) => request(`/agents/${id}`, { method: 'DELETE' }),
   demoInboundSMS: (phone: string, body: string, leadName?: string) =>
-    request('/demo/inbound-sms', { method: 'POST', body: JSON.stringify({ phone, body, leadName }) }),
+    demoRun('inbound-sms', { phone, body, leadName }),
   demoNewLead: (name: string, phone: string, email?: string, company?: string) =>
-    request('/demo/new-lead', { method: 'POST', body: JSON.stringify({ name, phone, email, company }) }),
+    demoRun('new-lead', { name, phone, email, company }),
   demoSimulate: (data?: { name?: string; phone?: string; company?: string }) =>
-    request('/demo/simulate-conversation', { method: 'POST', body: JSON.stringify(data || {}) }),
+    demoRun('simulate', data || {}),
   demoLiveConversation: (name: string, phone: string, company?: string) =>
     request<{ lead: Lead; conversation: Conversation }>('/demo/live-conversation', {
       method: 'POST',
       body: JSON.stringify({ name, phone, company }),
+    }),
+  exportDemoState: () => demoRun<DemoStateSnapshot>('export'),
+  importDemoState: (snapshot: DemoStateSnapshot) =>
+    request<{ ok: true; counts: Record<string, number> }>('/demo/state', {
+      method: 'POST',
+      body: JSON.stringify(snapshot),
     }),
 };
