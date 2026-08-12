@@ -1,171 +1,346 @@
-# SMS Sales Agent — AI-Powered Platform
+# Nationwide Advance — AI SMS Sales Agent
 
-A full-stack AI sales automation platform that handles two-way SMS conversations, syncs with CRM, and provides a real-time management dashboard for sales teams.
+Production dashboard and AI texting engine for **Nationwide Advance** business financing (MCA / working capital).
 
-## Project Overview
+**Live app:** [https://keith-sms-agent.vercel.app/](https://keith-sms-agent.vercel.app/)  
+**GitHub:** [TechNationwide/ai-sms-sales-agent](https://github.com/TechNationwide/ai-sms-sales-agent)
 
-This platform is an intelligent SMS sales agent that engages leads via text message, qualifies opportunities, handles objections, and escalates to human agents when needed. The system includes:
-
-- An **AI conversation engine** powered by OpenAI (with a demo fallback when no API key is configured)
-- **Twilio SMS** integration for inbound and outbound messaging
-- **Zoho CRM** integration for lead sync, notes, and task notifications
-- A **real-time dashboard** for monitoring and managing all conversations
-- **Agent authentication** so sales reps can log in, take over conversations, and resume AI
-
-The application runs locally in demo mode without any third-party API keys, making it easy for developers to explore and extend the codebase immediately.
+Leads apply on the Nationwide website (pre-qualified). This platform texts them via **iBluSend**, answers with **OpenAI**, syncs context to **Zoho CRM**, and lets Nationwide Tech Admin monitor, take over, and train the bot from Settings.
 
 ---
 
-## Features
+## Table of contents
 
-### AI Sales Agent
-- Context-aware conversational responses using configurable system prompts
-- Sentiment analysis on inbound messages
-- Automatic escalation when leads request a human or show negative sentiment
-- Customizable outreach templates for new leads
-
-### SMS & Lead Management
-- Two-way SMS via Twilio webhooks
-- Automatic lead creation from unknown phone numbers
-- Conversation threading with full message history
-- Deal outcome tracking (won / lost)
-
-### Human Takeover
-- Agents can pause AI and reply manually from the dashboard
-- Resume AI when the human handoff is complete
-- Agent identity recorded on takeover and manual replies
-
-### CRM Integration (Zoho)
-- OAuth-based Zoho CRM connection
-- Lead sync with `zoho_id` mapping
-- Automatic Notes on conversation start
-- Automatic Tasks on escalation and human takeover
-- Configurable notification toggles
-
-### Dashboard & Analytics
-- Live conversation monitoring via WebSocket
-- In-app notification bell for escalations and takeovers
-- Analytics: success rate, escalation rate, message volume, daily trends
-- Demo simulator for testing without real SMS
-
-### Agent & Team Management
-- JWT-based authentication
-- Role-based access (admin / agent)
-- Admin can create additional agent accounts
-- Bot training UI for non-technical configuration
+1. [What this system does](#1-what-this-system-does)
+2. [Who uses it](#2-who-uses-it)
+3. [Technology stack](#3-technology-stack)
+4. [High-level architecture](#4-high-level-architecture)
+5. [End-to-end business flow](#5-end-to-end-business-flow)
+6. [AI sales behavior (Nationwide script)](#6-ai-sales-behavior-nationwide-script)
+7. [Dashboard modules](#7-dashboard-modules)
+8. [Bot Training (operator-editable)](#8-bot-training-operator-editable)
+9. [Integrations setup](#9-integrations-setup)
+10. [API reference](#10-api-reference)
+11. [Environment variables](#11-environment-variables)
+12. [Local development](#12-local-development)
+13. [Production deploy (Vercel)](#13-production-deploy-vercel)
+14. [Folder structure](#14-folder-structure)
+15. [Security & compliance notes](#15-security--compliance-notes)
+16. [Known limitations & roadmap](#16-known-limitations--roadmap)
+17. [Changelog of what was built](#17-changelog-of-what-was-built)
 
 ---
 
-## Technology Stack
+## 1. What this system does
+
+| Capability | Detail |
+|------------|--------|
+| Outbound outreach | First text to a new applicant using a Nationwide-branded opener |
+| Inbound replies | AI responds in SMS/iMessage style using OpenAI |
+| Objections | Scripted handling for not interested, call later, competitor, rates/terms |
+| Docs CTA | Always steers toward application + recent **4-month bank statements** via upload link |
+| Escalation | Hands off when the merchant is upset, asks for a human, opts out, or hits complex/legal topics |
+| Human takeover | Tech Admin can pause AI, reply manually, resume AI |
+| CRM sync | Zoho Notes/Tasks on conversation start, escalation, takeover |
+| Training UI | Non-technical Bot Training in Settings (prompt, opener, upload link) |
+| Demo mode | Full dashboard testing without sending real messages |
+| PDF tool | Optional PDF compressor page for statement/document size reduction |
+
+**Not in v1:** multi-tenant orgs, team agent accounts, Twilio as primary channel, model fine-tuning.
+
+---
+
+## 2. Who uses it
+
+| Role | Access |
+|------|--------|
+| **Nationwide Tech Admin** | Single login. Full dashboard, Settings, Bot Training, takeover |
+| **AI agent** | Texts leads automatically when AI is enabled |
+| **Lead / merchant** | Receives/sends SMS or iMessage; never sees the dashboard |
+
+### Default login (production seed)
+
+| Field | Value |
+|-------|-------|
+| Email | `tech@nationwideadvance.com` |
+| Password | `tech@nationwideadvance.com` |
+
+Change this password for long-term production hardening when a password-change UI or secrets rotation process is added.
+
+---
+
+## 3. Technology stack
 
 | Layer | Technology |
 |-------|------------|
-| Frontend | React 18, TypeScript, Vite, Tailwind CSS, Recharts |
-| Backend | Node.js, Express, TypeScript |
-| Database | SQLite (better-sqlite3) |
-| Real-time | WebSocket (ws) |
-| AI | OpenAI API (gpt-4o-mini default) |
-| SMS | Twilio |
-| CRM | Zoho CRM API |
+| Frontend | React 18, TypeScript, Vite, Tailwind CSS, Recharts, React Router |
+| Backend | Node.js 22, Express, TypeScript |
+| Database | SQLite (`node:sqlite` / `DatabaseSync`) |
+| AI | OpenAI API (`gpt-4o-mini` default) |
+| Messaging | **iBluSend** (Mac bridge → iMessage / SMS) |
+| CRM | Zoho CRM (OAuth refresh token + REST) |
 | Auth | JWT + bcryptjs |
+| Realtime | WebSocket locally; **polling fallback** on Vercel serverless |
+| Hosting | Vercel (static client + `api/index.ts` serverless function) |
+| Email alerts | Optional SMTP (nodemailer); without SMTP, preview-only delivery |
+
+> Older docs mentioning Twilio as the primary SMS path are outdated. **Production messaging is iBluSend.** A Twilio webhook route remains only for local/legacy tests.
 
 ---
 
-## Architecture
+## 4. High-level architecture
 
 ```
-┌─────────────┐     HTTP/WS      ┌──────────────────┐
-│   React     │ ◄──────────────► │  Express API     │
-│  Dashboard  │                  │  (port 3001)     │
-└─────────────┘                  └────────┬─────────┘
-                                          │
-                    ┌─────────────────────┼─────────────────────┐
-                    ▼                     ▼                     ▼
-              ┌──────────┐         ┌──────────┐         ┌──────────┐
-              │  SQLite  │         │  OpenAI  │         │  Twilio  │
-              │    DB    │         │   API    │         │   SMS    │
-              └──────────┘         └──────────┘         └──────────┘
-                                          │
-                                          ▼
-                                    ┌──────────┐
-                                    │ Zoho CRM │
-                                    └──────────┘
+                    ┌──────────────────────────────┐
+                    │   Nationwide website form    │
+                    │   (lead already pre-qualified)│
+                    └──────────────┬───────────────┘
+                                   │ Zoho lead / webhook
+                                   ▼
+┌─────────────┐   HTTPS/JWT    ┌──────────────────┐
+│  React      │◄──────────────►│  Express API     │
+│  Dashboard  │   (+ polling)  │  (Vercel / local)│
+└─────────────┘                └────────┬─────────┘
+                                        │
+              ┌────────────┬────────────┬────────────┐
+              ▼            ▼            ▼            ▼
+         ┌────────┐  ┌────────┐  ┌──────────┐  ┌─────────┐
+         │ SQLite │  │ OpenAI │  │ iBluSend │  │ Zoho CRM│
+         │   DB   │  │   AI   │  │ messages │  │ Notes/  │
+         └────────┘  └────────┘  └──────────┘  │ Tasks   │
+                                               └─────────┘
 ```
 
-### Request Flow (Inbound SMS)
+### Runtime paths
 
-1. Lead sends SMS → Twilio webhook hits `POST /api/webhooks/twilio/sms`
-2. Server finds or creates lead by phone number
-3. Message stored; AI generates response (or demo fallback)
-4. Response sent via Twilio (or logged in demo mode)
-5. WebSocket broadcasts update to connected dashboards
-6. Optional Zoho Note/Task created on configured events
+| Environment | API | DB location | Realtime |
+|-------------|-----|-------------|----------|
+| Local `npm run dev` | `http://localhost:3001` | `server/data/` | WebSocket `/ws` |
+| Vercel production | `https://keith-sms-agent.vercel.app/api` | `/tmp` (ephemeral) | Polling |
 
 ---
 
-## Folder Structure
+## 5. End-to-end business flow
 
-```
-ai-sms-sales-agent/
-├── client/                    # React frontend (Vite)
-│   ├── src/
-│   │   ├── api.ts             # REST API client
-│   │   ├── App.tsx            # Layout, routing, auth gate
-│   │   ├── components/        # Reusable UI components
-│   │   ├── context/           # AuthContext (JWT session)
-│   │   ├── hooks/             # useWebSocket
-│   │   └── pages/             # Dashboard, Conversations, Analytics, Settings, Login
-│   ├── index.html
-│   └── vite.config.ts         # Dev proxy to API
-├── server/                    # Express backend
-│   ├── src/
-│   │   ├── db/                # SQLite schema, seed data
-│   │   ├── middleware/        # JWT auth middleware
-│   │   ├── models/            # Repository (CRUD)
-│   │   ├── routes/            # API routes
-│   │   └── services/          # AI, Twilio, Zoho, auth, notifications, conversation
-│   ├── data/                  # SQLite database (auto-created, gitignored)
-│   └── tsconfig.json
-├── .env.example               # Environment variable template
-├── package.json               # Root scripts (concurrently)
-└── README.md
-```
+### A. New lead outreach
+
+1. Lead submits financing application on Nationwide’s site (pre-qualified).
+2. Zoho creates/updates the lead → webhook `POST /api/webhooks/zoho/lead` (or Demo → New Lead).
+3. Platform creates lead + conversation if none is active.
+4. AI sends the **outreach opener** (Bot Training template) via iBluSend.
+5. Zoho Note + in-app notification: “Outreach Sent”.
+
+### B. Inbound message → AI reply
+
+1. Merchant texts back.
+2. iBluSend fires `message.received` → `POST /api/webhooks/iblusend`.
+3. Platform finds/creates lead by phone, stores inbound message, runs sentiment.
+4. If conversation is active and AI enabled → OpenAI generates reply using system prompt + last ~10 messages.
+5. Outbound reply sent via iBluSend; dashboard updates (poll/WS).
+
+### C. Objection & docs push
+
+AI does **not** re-qualify (form already did). It handles objections and repeatedly steers to:
+
+- Complete the application  
+- Upload **recent 4-month bank statements**  
+- Use the **secure upload link** from Settings (`bot_upload_link`)
+
+### D. Escalation / human handoff
+
+Triggers include:
+
+- Explicit ask for a human / specialist  
+- Frustrated / angry sentiment  
+- STOP / unsubscribe / opt-out  
+- Legal / complaint language  
+- AI emits `[ESCALATE]` for questions too complex for text  
+
+Effects:
+
+- Conversation status → `escalated`, AI disabled  
+- Zoho Task (if enabled)  
+- Dashboard bell + escalation email to `ESCALATION_EMAIL` / Settings notify address  
+
+**Note:** “Call me later” is **not** an auto-escalation — AI asks for best time and best number.
+
+### E. Human takeover
+
+1. Tech Admin opens Conversations → **Take Over** (pause AI).  
+2. Types manual replies.  
+3. **Resume AI** when ready to hand back to the bot.  
+4. **Close** deal as won/lost when appropriate.
 
 ---
 
-## Installation & Setup
+## 6. AI sales behavior (Nationwide script)
 
-### Prerequisites
+Defaults live in `server/src/services/ai.ts` and are editable in **Settings → Bot Training**.
 
-- **Node.js** 18+ (20+ recommended)
-- **npm** 9+
+| Topic | Behavior |
+|-------|----------|
+| Opener | Thank them for applying / trusting Nationwide with financing needs; reference funding need; invite next step on app + statements |
+| Qualifying | **Do not** run a long qualification checklist |
+| Not interested | Ask why they applied if not interested / what steered them away |
+| Call later | Ask best time + confirm best number |
+| Already with someone | Affirm shopping around; ask what goal wasn’t met |
+| Rates / terms | Depend on qualifying factors; Nationwide strives for best rate/term outcomes; push docs |
+| Never say | Guaranteed rates, approvals, amounts, or timelines |
+| Always push | Application + 4-month bank statements on upload link |
+| Handoff | Upset merchant or questions too difficult for text |
 
-### 1. Clone the repository
+---
+
+## 7. Dashboard modules
+
+| Route | Purpose |
+|-------|---------|
+| `/` Dashboard | KPIs, needs-attention escalations, demo simulator, recent conversations |
+| `/leads` | Lead list with status |
+| `/conversations` | Thread view, reply, pause/resume, close |
+| `/analytics` | Success / escalation / volume trends |
+| `/pdf-compressor` | Compress PDFs (statements/docs) for easier sharing |
+| `/settings` | Integrations, Bot Training, escalation email |
+| `/docs` | **In-app documentation** (this guide, readable inside the product) |
+| `/login` | Auth gate |
+
+### Demo Simulator (Dashboard)
+
+Use without burning live SMS:
+
+- **Trigger Outreach SMS** — simulate new-lead opener  
+- **Send Inbound SMS** — simulate merchant reply + AI response  
+- **Simulate Full Conversation** — seed a sample thread  
+
+---
+
+## 8. Bot Training (operator-editable)
+
+Path: **Settings → Bot Training**
+
+| Field | Key | Notes |
+|-------|-----|-------|
+| Company Name | `bot_company_name` | Default: Nationwide Advance |
+| Secure Upload Link | `bot_upload_link` | Sent when merchant is ready for docs |
+| Products / Services Notes | `bot_products_catalog` | Optional context appended to prompt |
+| System Prompt | `bot_system_prompt` | Personality, objections, never-say, handoff rules |
+| Outreach Opener | `bot_outreach_template` | Placeholders: `{firstName}`, `{name}`, `{fundingNeed}` |
+
+**How training works:** prompt engineering stored in settings (and code defaults). **Not** OpenAI fine-tuning. Changes apply on the **next** AI reply.
+
+Also configurable nearby: OpenAI key/model, iBluSend keys, Zoho OAuth + notify toggles, escalation notify email.
+
+---
+
+## 9. Integrations setup
+
+### iBluSend (primary messaging)
+
+1. Create API key in iBluSend → Developer → API Keys.  
+   - `iblu_test_…` = sandbox  
+   - `iblu_…` = live  
+2. Set Outbound Webhook to:
+
+```text
+https://keith-sms-agent.vercel.app/api/webhooks/iblusend
+```
+
+3. Put API key + webhook signing secret (+ optional device ID) in Vercel env or Settings.
+
+### Zoho CRM
+
+1. Create OAuth client; obtain refresh token with CRM scopes.  
+2. Set `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN`, optional `ZOHO_WEBHOOK_SECRET`.  
+3. Point Zoho automation / webhook at:
+
+```text
+https://keith-sms-agent.vercel.app/api/webhooks/zoho/lead
+```
+
+4. Toggle Notes on conversation start and Tasks on escalation in Settings.
+
+### OpenAI
+
+1. Set `OPENAI_API_KEY` (and optional `OPENAI_MODEL`).  
+2. Set `DEMO_MODE=false` in production so real AI is used.
+
+### Escalation email
+
+1. Set `ESCALATION_EMAIL=tech@nationwideadvance.com` (or override in Settings).  
+2. Optional SMTP vars for real delivery (`SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, …).
+
+---
+
+## 10. API reference
+
+Base: `https://keith-sms-agent.vercel.app/api` (or `http://localhost:3001/api`)
+
+### Public
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Health check |
+| POST | `/auth/login` | `{ email, password }` → `{ token, agent }` |
+| POST | `/webhooks/iblusend` | iBluSend inbound events |
+| POST | `/webhooks/zoho/lead` | New/updated Zoho lead |
+| POST | `/webhooks/twilio/sms` | Legacy/local only |
+
+### Protected (Bearer JWT)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/auth/me` | Current admin profile |
+| GET/POST | `/leads` | List / create leads |
+| GET | `/conversations` | List conversations |
+| GET | `/conversations/:id` | Thread + messages |
+| POST | `/conversations/:id/reply` | Human reply |
+| POST | `/conversations/:id/pause` | Take over (pause AI) |
+| POST | `/conversations/:id/resume` | Resume AI |
+| POST | `/conversations/:id/close` | `{ outcome: "won" \| "lost" }` |
+| GET | `/analytics` | Dashboard metrics |
+| GET/PUT | `/settings` | Read/update config |
+| GET | `/notifications` | In-app alerts |
+| POST | `/demo/inbound-sms` | Simulate inbound |
+| POST | `/demo/new-lead` | Simulate outreach |
+| POST | `/demo/simulate-conversation` | Seed demo thread |
+| POST | `/agents` | **403** — multi-user disabled in v1 |
+
+---
+
+## 11. Environment variables
+
+Copy `.env.example` → `.env` for local use. On Vercel, set the same keys in Project → Settings → Environment Variables.
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `JWT_SECRET` | Prod | JWT signing secret |
+| `OPENAI_API_KEY` | Prod AI | OpenAI key |
+| `OPENAI_MODEL` | No | Default `gpt-4o-mini` |
+| `IBLUSEND_API_KEY` | Prod SMS | iBluSend API key |
+| `IBLUSEND_WEBHOOK_SECRET` | Recommended | Webhook signature secret |
+| `IBLUSEND_DEVICE_ID` | No | Default device UUID |
+| `IBLUSEND_BASE_URL` | No | API base URL |
+| `ZOHO_CLIENT_ID` | Zoho | OAuth client |
+| `ZOHO_CLIENT_SECRET` | Zoho | OAuth secret |
+| `ZOHO_REFRESH_TOKEN` | Zoho | Refresh token |
+| `ZOHO_API_DOMAIN` | No | Default `https://www.zohoapis.com` |
+| `ZOHO_WEBHOOK_SECRET` | Recommended | Validates Zoho webhooks |
+| `DEMO_MODE` | Prod | Set `false` for live AI/messaging |
+| `ESCALATION_EMAIL` | Recommended | Alert inbox |
+| `DASHBOARD_URL` | No | Links inside alert emails |
+| `SMTP_*` / `EMAIL_FROM` | No | Real outbound email |
+
+---
+
+## 12. Local development
+
+**Prerequisites:** Node.js 18+ (20/22 recommended), npm 9+
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/TechNationwide/ai-sms-sales-agent.git
 cd ai-sms-sales-agent
-```
-
-### 2. Install dependencies
-
-```bash
 npm run install:all
-```
-
-This installs root, server, and client packages.
-
-### 3. Configure environment
-
-```bash
 cp .env.example .env
-```
-
-Edit `.env` with your values. The app runs in **demo mode** without API keys.
-
-### 4. Start development servers
-
-```bash
 npm run dev
 ```
 
@@ -173,251 +348,110 @@ npm run dev
 |---------|-----|
 | Dashboard | http://localhost:5173 |
 | API | http://localhost:3001/api |
-| WebSocket | ws://localhost:3001/ws |
-| Health check | http://localhost:3001/api/health |
+| Health | http://localhost:3001/api/health |
 
-### 5. First login
-
-On first server start, a default admin account is seeded:
-
-| Field | Value |
-|-------|-------|
-| Email | `admin@example.com` |
-| Password | `changeme123` |
-
-**Change this password immediately in production** by creating a new admin and removing the default, or updating the seed logic.
+Vite proxies `/api` to the Express server during development.
 
 ---
 
-## Environment Variables
+## 13. Production deploy (Vercel)
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `PORT` | No | API server port (default: `3001`) |
-| `NODE_ENV` | No | `development` or `production` |
-| `JWT_SECRET` | **Yes (prod)** | Secret for signing JWT tokens |
-| `OPENAI_API_KEY` | No | OpenAI API key (demo fallback if empty) |
-| `OPENAI_MODEL` | No | Model name (default: `gpt-4o-mini`) |
-| `TWILIO_ACCOUNT_SID` | No | Twilio account SID |
-| `TWILIO_AUTH_TOKEN` | No | Twilio auth token |
-| `TWILIO_PHONE_NUMBER` | No | Twilio sending number (E.164) |
-| `ZOHO_CLIENT_ID` | No | Zoho OAuth client ID |
-| `ZOHO_CLIENT_SECRET` | No | Zoho OAuth client secret |
-| `ZOHO_REFRESH_TOKEN` | No | Zoho OAuth refresh token |
-| `ZOHO_API_DOMAIN` | No | Zoho API domain (default: `https://www.zohoapis.com`) |
-| `DEMO_MODE` | No | `true` to enable demo fallbacks (default: `true`) |
+Project: **Technationwide / keith-sms-agent**  
+Public URL: **https://keith-sms-agent.vercel.app/**
 
-Settings can also be configured via the dashboard **Settings** page (stored in SQLite).
+How it is packaged (`vercel.json`):
+
+1. Install root + `server` + `client` deps  
+2. Build client → `client/dist`  
+3. Serverless function `api/index.ts` mounts the Express app  
+4. Rewrites `/api/*` → serverless function  
+
+**Deploy notes:**
+
+- Keep the PDF resizer companion folder out of the Vercel upload when it causes FastAPI auto-detect conflicts (use `.vercelignore` / exclude during CLI deploy).  
+- After env changes, redeploy so functions pick them up.  
+- SQLite on Vercel is **ephemeral** (`/tmp`) — fine for demos; for durable production history, plan Postgres (or similar) later.
 
 ---
 
-## Development Workflow
+## 14. Folder structure
 
-```bash
-# Run both frontend and backend
-npm run dev
-
-# Run backend only
-npm run dev:server
-
-# Run frontend only
-npm run dev:client
-
-# Type-check and build for production
-npm run build
-
-# Start production server (serves built frontend)
-npm start
-```
-
-### Vite Dev Proxy
-
-During development, the React app proxies `/api` and `/ws` to the Express server on port 3001. No CORS configuration is needed locally.
-
-### Demo Mode
-
-When `DEMO_MODE=true` or API keys are missing:
-
-- AI uses built-in smart fallback responses
-- SMS messages are logged to the console instead of sent
-- Zoho operations are skipped with console logs
-- Full dashboard functionality remains available
-
-Use the **Demo Panel** on the dashboard to simulate inbound SMS, new leads, and full conversations.
-
----
-
-## Build & Deployment
-
-### Production Build
-
-```bash
-npm run build
-```
-
-This builds the React app to `client/dist/` and compiles the server to `server/dist/`.
-
-### Start Production Server
-
-```bash
-NODE_ENV=production npm start
-```
-
-The Express server serves the built React app and API from a single port.
-
-### Deployment Recommendations
-
-| Component | Suggested Service |
-|-----------|-------------------|
-| API + Frontend | AWS ECS/Fargate, Railway, Render, Fly.io |
-| Database | Migrate SQLite → PostgreSQL for production scale |
-| Webhooks | Public HTTPS URL required for Twilio/Zoho |
-| Secrets | AWS Secrets Manager, environment variables |
-| Static assets | CloudFront CDN (optional, if split from API) |
-
-### Webhook URLs (Production)
-
-Configure these in Twilio and Zoho:
-
-```
-POST https://your-domain.com/api/webhooks/twilio/sms
-POST https://your-domain.com/api/webhooks/zoho/lead
+```text
+ai-sms-sales-agent/
+├── api/                      # Vercel serverless entry → Express
+├── client/                   # React dashboard (Vite)
+│   └── src/
+│       ├── pages/            # Dashboard, Leads, Conversations, Analytics,
+│       │                     # PDF Compressor, Settings, Docs, Login
+│       ├── components/
+│       ├── context/          # Auth
+│       ├── hooks/            # WebSocket / polling
+│       └── api.ts
+├── server/
+│   └── src/
+│       ├── db/               # Schema + seed
+│       ├── models/           # Repository CRUD
+│       ├── routes/           # REST API
+│       ├── services/         # AI, iBluSend, Zoho, auth, email, conversation
+│       ├── middleware/       # JWT
+│       ├── app.ts
+│       └── index.ts          # Local HTTP + WS server
+├── .env.example
+├── vercel.json
+├── render.yaml               # Alternate host option
+└── README.md                 # This document
 ```
 
 ---
 
-## API Documentation
+## 15. Security & compliance notes
 
-Base URL: `http://localhost:3001/api`
-
-### Public Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/` | API info and available routes |
-| `GET` | `/health` | Health check |
-| `POST` | `/auth/login` | Agent login `{ email, password }` → `{ token, agent }` |
-| `POST` | `/webhooks/twilio/sms` | Twilio inbound SMS webhook |
-| `POST` | `/webhooks/zoho/lead` | Zoho new lead webhook |
-
-### Protected Endpoints (Bearer JWT required)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/auth/me` | Current agent profile |
-| `GET` | `/conversations` | List all conversations |
-| `GET` | `/conversations/:id` | Conversation with messages |
-| `POST` | `/conversations/:id/reply` | Send human reply `{ body }` |
-| `POST` | `/conversations/:id/pause` | Take over (pause AI) |
-| `POST` | `/conversations/:id/resume` | Resume AI |
-| `POST` | `/conversations/:id/close` | Close deal `{ outcome: "won" \| "lost" }` |
-| `GET` | `/analytics` | Dashboard analytics |
-| `GET` | `/settings` | Get settings (secrets masked) |
-| `PUT` | `/settings` | Update settings |
-| `GET` | `/notifications` | List notifications + unread count |
-| `POST` | `/notifications/:id/read` | Mark notification read |
-| `POST` | `/notifications/read-all` | Mark all read |
-| `GET` | `/agents` | List agents |
-| `POST` | `/agents` | Create agent (admin only) |
-| `POST` | `/demo/inbound-sms` | Simulate inbound SMS |
-| `POST` | `/demo/new-lead` | Simulate new lead outreach |
-| `POST` | `/demo/simulate-conversation` | Create demo conversation |
-
-### Authentication
-
-```bash
-# Login
-curl -X POST http://localhost:3001/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"admin@example.com","password":"changeme123"}'
-
-# Use token
-curl http://localhost:3001/api/conversations \
-  -H "Authorization: Bearer <token>"
-```
-
-### WebSocket Events
-
-Connect to `ws://localhost:3001/ws`. Events include:
-
-| Event | Description |
-|-------|-------------|
-| `connected` | Initial connection confirmation |
-| `message` | New message in a conversation |
-| `conversation_updated` | Conversation status changed |
-| `notification` | New in-app notification |
+- Never guarantee rates, approvals, or funding amounts over text.  
+- Never ask for SSN, full bank login, or card numbers in SMS.  
+- Honor STOP / unsubscribe (escalate + stop selling).  
+- Keep API keys in Vercel env / Settings — never commit `.env`.  
+- Webhook secrets should be enabled for iBluSend and Zoho in production.  
+- JWT secret must be unique and strong in production.
 
 ---
 
-## Database
-
-SQLite database is auto-created at `server/data/sales-agent.db` on first run.
-
-### Schema
-
-| Table | Purpose |
-|-------|---------|
-| `settings` | Key-value configuration store |
-| `leads` | Lead contact records |
-| `conversations` | Conversation state and metadata |
-| `messages` | Individual SMS messages |
-| `analytics_events` | Event log for reporting |
-| `agents` | Dashboard user accounts |
-| `notifications` | In-app notification records |
-
-### Migrations
-
-There is no formal migration framework. Schema is defined in `server/src/db/index.ts` using `CREATE TABLE IF NOT EXISTS`. For production, consider adopting a migration tool (e.g., Drizzle, Knex) when moving to PostgreSQL.
-
-### Seed Data
-
-On first run, `server/src/db/seed.ts` creates sample leads and conversations for demo purposes. A default admin agent is seeded by `server/src/services/auth.ts`.
-
-To reset: delete `server/data/sales-agent.db` and restart the server.
-
----
-
-## Bot Training
-
-Non-technical users can configure the AI via **Settings → Bot Training**:
-
-- **Company Name** — injected into AI context
-- **Products / Services Catalog** — pricing and feature reference
-- **System Prompt** — personality, rules, and conversation guidelines
-- **Outreach Template** — first message sent to new leads (`{name}` placeholder supported)
-
-Changes take effect on the next AI response. No model fine-tuning is required.
-
----
-
-## Known Limitations
+## 16. Known limitations & roadmap
 
 | Limitation | Notes |
 |------------|-------|
-| Single-tenant | One organization per deployment; no multi-tenant isolation |
-| SQLite | Suitable for development and small deployments; migrate for scale |
-| No formal migrations | Schema changes require manual handling |
-| Zoho notifications | Notes/Tasks only — not native Zoho push notifications |
-| Demo credentials | Default admin password must be changed in production |
-| JWT secret | Uses a dev default if `JWT_SECRET` is not set |
+| Single-user v1 | One Tech Admin login; team agents deferred |
+| Ephemeral SQLite on Vercel | Data can reset on cold starts; stable admin ID keeps login working |
+| Serverless WebSocket | Dashboard uses polling on Vercel |
+| SMTP optional | Without SMTP, escalation email may be preview-only |
+| No formal DB migrations | Schema via `CREATE TABLE IF NOT EXISTS` |
+| Single organization | Not multi-tenant |
+
+**Likely next steps:** Postgres, durable storage, multi-user agents (when approved), stronger webhook verification defaults, CI, password-change UI.
 
 ---
 
-## Future Improvements
+## 17. Changelog of what was built
 
-- [ ] PostgreSQL support with migration framework
-- [ ] Multi-tenant architecture (org isolation)
-- [ ] Email and push notification channels
-- [ ] Conversation assignment and queue management
-- [ ] OpenAI function calling for structured lead qualification
-- [ ] Rate limiting and webhook signature verification
-- [ ] CI/CD pipeline (GitHub Actions)
-- [ ] Docker Compose for local and production deployment
-- [ ] Unit and integration test suite
-- [ ] Audit log for agent actions
+This section documents the delivered Nationwide platform as of the current main branch:
+
+1. **Full-stack AI SMS agent** — React dashboard + Express API + SQLite.  
+2. **iBluSend messaging path** — inbound webhook + outbound send (Twilio demoted to legacy).  
+3. **OpenAI conversation engine** — system prompt, sentiment, demo fallbacks.  
+4. **Zoho CRM hooks** — lead webhook, Notes/Tasks, notify toggles.  
+5. **Nationwide sales script** — opener, objections, no-guarantee rules, docs CTA, upset/complex handoff.  
+6. **Bot Training UI** — company, prompt, opener, upload link editable by Tech Admin.  
+7. **Escalation alerts** — in-app bell + email to Nationwide tech inbox.  
+8. **Human takeover** — pause AI / manual reply / resume.  
+9. **Demo Simulator** — test outreach and inbound without live SMS.  
+10. **Auth hardening for Vercel** — stable admin identity so login survives ephemeral DB.  
+11. **Production login** — `tech@nationwideadvance.com`.  
+12. **Vercel production deploy** — Technationwide project, live URL above.  
+13. **PDF compressor page** — helper for shrinking statement PDFs.  
+14. **In-app Docs page** — same architecture/business documentation inside the product.  
+15. **GitHub** — source of truth at TechNationwide/ai-sms-sales-agent.
 
 ---
 
 ## License
 
-Private repository. All rights reserved.
+Private repository for Nationwide Advance / TechNationwide. All rights reserved.

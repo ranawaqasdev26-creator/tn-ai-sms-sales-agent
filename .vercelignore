@@ -1,0 +1,12 @@
+Keith - pdf resizer
+node_modules
+client/node_modules
+server/node_modules
+.git
+*.db
+*.db-shm
+*.db-wal
+server/data
+.env
+.env.*
+!/.env.example

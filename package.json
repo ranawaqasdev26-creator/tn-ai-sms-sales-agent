@@ -2,7 +2,11 @@
   "name": "ai-sms-sales-agent",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "AI-powered SMS sales agent and management dashboard",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "npm run dev --prefix server",
@@ -11,7 +15,29 @@
     "start": "npm run start --prefix server",
     "install:all": "npm install && npm install --prefix server && npm install --prefix client"
   },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.3",
+    "nodemailer": "^9.0.5",
+    "openai": "^4.77.0",
+    "twilio": "^5.4.0",
+    "uuid": "^11.0.5",
+    "ws": "^8.18.0"
+  },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.10.5",
+    "@types/nodemailer": "^8.0.1",
+    "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.5.13",
+    "@vercel/node": "^5.3.6",
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
   }
 }

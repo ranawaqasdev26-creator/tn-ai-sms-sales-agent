@@ -183,7 +183,8 @@ export async function fetchNewZohoLeads(): Promise<ZohoLead[]> {
 export function getIntegrationStatus() {
   return {
     zoho: { configured: isZohoConfigured(), status: isZohoConfigured() ? 'connected' : 'demo' },
-    twilio: { configured: false },
+    iblusend: { configured: !!(getSetting('iblusend_api_key') || process.env.IBLUSEND_API_KEY) },
     openai: { configured: !!(getSetting('openai_api_key') || process.env.OPENAI_API_KEY) },
   };
 }
+

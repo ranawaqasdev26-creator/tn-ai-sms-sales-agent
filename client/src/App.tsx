@@ -1,14 +1,16 @@
 import { Routes, Route, NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, MessageSquare, BarChart3, Settings, Radio,
-  Bot, Zap, LogOut, User, Users, FileArchive, CheckCircle2,
+  Zap, LogOut, User, Users, FileArchive, CheckCircle2, BookOpen,
 } from 'lucide-react';
+
 import Dashboard from './pages/Dashboard';
 import Leads from './pages/Leads';
 import Conversations from './pages/Conversations';
 import Analytics from './pages/Analytics';
 import PdfCompressor from './pages/PdfCompressor';
 import SettingsPage from './pages/Settings';
+import DocsPage from './pages/Docs';
 import Login from './pages/Login';
 import NotificationBell from './components/NotificationBell';
 import { useWebSocket } from './hooks/useWebSocket';
@@ -22,9 +24,9 @@ const nav = [
   { to: '/conversations', icon: MessageSquare, label: 'Conversations' },
   { to: '/analytics', icon: BarChart3, label: 'Analytics' },
   { to: '/pdf-compressor', icon: FileArchive, label: 'PDF Compressor' },
+  { to: '/docs', icon: BookOpen, label: 'Docs' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
-
 function AppShell() {
   const location = useLocation();
   const { agent, logout } = useAuth();
@@ -46,8 +48,8 @@ function AppShell() {
       <aside className="w-64 bg-luxury-sidebar border-r border-luxury-200 flex flex-col shrink-0 shadow-luxury">
         <div className="p-5 border-b border-luxury-200">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gold-shine flex items-center justify-center shadow-gold">
-              <Bot className="w-6 h-6 text-white" />
+            <div className="w-10 h-10 rounded-xl overflow-hidden shadow-luxury ring-1 ring-luxury-200 bg-white shrink-0">
+              <img src="/favicon.svg?v=4" alt="" className="w-full h-full object-cover" />
             </div>
             <div>
               <h1 className="font-display font-semibold text-lg leading-tight text-luxury-900">SMS Agent</h1>
@@ -78,9 +80,9 @@ function AppShell() {
 
         <div className="p-4 border-t border-luxury-200 space-y-3 bg-white/40">
           <div className="flex items-center gap-2 text-xs">
-            <Radio className={`w-3.5 h-3.5 ${connected ? 'text-emerald-600' : 'text-red-500'}`} />
-            <span className={connected ? 'text-emerald-700 font-medium' : 'text-red-600 font-medium'}>
-              {connected ? 'Live' : 'Reconnecting...'}
+            <Radio className={`w-3.5 h-3.5 ${connected ? 'text-emerald-600' : 'text-amber-600'}`} />
+            <span className={connected ? 'text-emerald-700 font-medium' : 'text-amber-700 font-medium'}>
+              {connected ? 'Live' : 'Polling'}
             </span>
           </div>
           {demoMode !== false && (
@@ -119,6 +121,7 @@ function AppShell() {
             <Route path="/conversations" element={<Conversations refreshKey={refreshKey} />} />
             <Route path="/analytics" element={<Analytics refreshKey={refreshKey} />} />
             <Route path="/pdf-compressor" element={<PdfCompressor />} />
+            <Route path="/docs" element={<DocsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </div>

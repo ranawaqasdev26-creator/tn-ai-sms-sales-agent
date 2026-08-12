@@ -24,15 +24,15 @@ export function createNotification(data: {
     INSERT INTO notifications (id, type, title, body, conversation_id, lead_id)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(id, data.type, data.title, data.body, data.conversationId ?? null, data.leadId ?? null);
-  return db.prepare('SELECT * FROM notifications WHERE id = ?').get(id) as AppNotification;
+  return db.prepare('SELECT * FROM notifications WHERE id = ?').get(id) as unknown as AppNotification;
 }
 
 export function getUnreadNotifications(): AppNotification[] {
-  return db.prepare('SELECT * FROM notifications WHERE read = 0 ORDER BY created_at DESC LIMIT 50').all() as AppNotification[];
+  return db.prepare('SELECT * FROM notifications WHERE read = 0 ORDER BY created_at DESC LIMIT 50').all() as unknown as AppNotification[];
 }
 
 export function getAllNotifications(limit = 50): AppNotification[] {
-  return db.prepare('SELECT * FROM notifications ORDER BY created_at DESC LIMIT ?').all(limit) as AppNotification[];
+  return db.prepare('SELECT * FROM notifications ORDER BY created_at DESC LIMIT ?').all(limit) as unknown as AppNotification[];
 }
 
 export function markNotificationRead(id: string) {

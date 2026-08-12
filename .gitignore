@@ -40,3 +40,4 @@ Keith - pdf resizer/data/outputs/
 
 # Claude settings (local)
 .claude/
+.vercel

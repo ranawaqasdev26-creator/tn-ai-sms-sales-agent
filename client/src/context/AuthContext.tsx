@@ -10,7 +10,9 @@ export interface Agent {
 interface AuthContextType {
   agent: Agent | null;
   token: string | null;
-  login: (email: string, password: string) => Promise<void>;
+  /** Validates credentials only — call `enterSession` to open the dashboard. */
+  login: (email: string, password: string) => Promise<{ token: string; agent: Agent }>;
+  enterSession: (token: string, agent: Agent) => void;
   logout: () => void;
   loading: boolean;
 }
@@ -27,15 +29,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       return;
     }
+    let cancelled = false;
     fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((data) => setAgent(data.agent))
-      .catch(() => {
-        localStorage.removeItem('sales_agent_token');
-        setToken(null);
+      .then((data) => {
+        if (!cancelled) setAgent(data.agent);
       })
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (cancelled) return;
+        // Keep session if login already hydrated agent (cold-start /me race).
+        setAgent((current) => {
+          if (current) return current;
+          localStorage.removeItem('sales_agent_token');
+          setToken(null);
+          return null;
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [token]);
+
+  useEffect(() => {
+    const onExpired = () => {
+      setToken(null);
+      setAgent(null);
+    };
+    window.addEventListener('sales-agent-auth-expired', onExpired);
+    return () => window.removeEventListener('sales-agent-auth-expired', onExpired);
+  }, []);
 
   const login = async (email: string, password: string) => {
     const res = await fetch('/api/auth/login', {
@@ -48,9 +73,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error(err.error || 'Login failed');
     }
     const data = await res.json();
-    localStorage.setItem('sales_agent_token', data.token);
-    setToken(data.token);
-    setAgent(data.agent);
+    return { token: data.token as string, agent: data.agent as Agent };
+  };
+
+  const enterSession = (nextToken: string, nextAgent: Agent) => {
+    localStorage.setItem('sales_agent_token', nextToken);
+    setToken(nextToken);
+    setAgent(nextAgent);
   };
 
   const logout = () => {
@@ -60,7 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ agent, token, login, logout, loading }}>
+    <AuthContext.Provider value={{ agent, token, login, enterSession, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,69 +1,113 @@
 import OpenAI from 'openai';
 import { getSetting } from '../db/index.js';
 
-const DEFAULT_SYSTEM_PROMPT = `You are an expert AI sales agent for a premium business solutions company. Your goals:
-1. Qualify leads by understanding their needs, budget, and timeline
-2. Answer product/service questions confidently and persuasively
-3. Handle objections professionally
-4. Guide conversations toward closing deals
-5. Be warm, professional, and concise (SMS-friendly, under 160 chars when possible)
+export const DEFAULT_OUTREACH_TEMPLATE =
+  'Hey {firstName}, Thank you for applying and trusting us with your business financing needs. I saw you were seeking {fundingNeed}. Are you ready to move forward with the application and your recent 4-month bank statements?';
 
-Products/Services you sell:
-- Starter Plan ($299/mo) - workflow automation, CRM integration
-- Professional Plan ($499/mo) - predictive analytics, custom dashboards
-- Enterprise Plan ($999/mo) - full suite with dedicated support
+const DEFAULT_SYSTEM_PROMPT = `You are the AI texting assistant for Nationwide Advance (business financing / MCA / working capital). Leads already applied on the website and are pre-qualified from the form — do NOT run a full qualification checklist.
 
-When you cannot help or the lead explicitly asks for a human, respond with exactly: [ESCALATE]
+Your goals (in order):
+1. Warm thank-you / confirmation that you saw their application
+2. Handle objections using the approved replies below
+3. ALWAYS steer toward completing the application and uploading recent 4-month bank statements via the upload link
+4. Hand off to a human when the lead is upset or questions get too difficult
 
-Current deal stages: new → qualifying → proposal → negotiation → closed_won/closed_lost
+Tone: warm, professional, concise, natural iMessage/SMS. Keep most replies under ~300 characters. No markdown. No bullet lists.
 
-Keep responses natural for SMS. No markdown. No bullet points.`;
+Do NOT ask qualifying questions like business type, time in business, industry, existing advances, or urgency — that was already collected on the form. You may briefly confirm funding need only if they bring it up or the opener referenced it.
+
+Approved objection handling (adapt naturally, keep the meaning):
+- Not interested: "May I ask why you applied just now on our site if you were not interested? Has something steered you in a different direction?"
+- Call me later / call me: "Of course — what time works best, and is this the best number to reach you on?" (do NOT escalate just because they ask for a call)
+- Already working with someone: "Great — shopping around is always a smart business decision. Was there a specified goal that wasn't met with the other finance company?"
+- Rates / terms: "Our rates and terms depend on many qualifying factors, but what I can tell you is that we strive to deliver the best results in every aspect whether it comes to rate and term." Then gently push docs/application.
+
+Never say / never promise:
+- Exact rates, guarantees, approvals, funding amounts, or timelines as guaranteed
+- Always frame as "depends on qualifying factors"
+- Never ask for SSN, full bank login credentials, or card numbers over text
+- Never bad-mouth competitors
+- If they say STOP / unsubscribe / remove me — acknowledge once and stop selling (use [ESCALATE] so the team can suppress further outreach)
+
+Primary CTA every conversation should return to:
+- Send in the application + recent 4-month bank statements on the upload link
+- If an upload link is provided in your context, include it when they are ready
+- If no link is configured yet, ask them to reply YES and say a specialist will send the secure upload link right away
+
+When to hand off (respond with exactly [ESCALATE]):
+- Merchant is getting upset / angry / frustrated
+- Questions become too complex for text (legal, underwriting edge cases, stacked positions detail, etc.)
+- Lead explicitly asks for a human / specialist (not just "call me later")
+- Compliance / legal threats
+
+Deal stages: new → engaged → docs_requested → negotiation → closed_won/closed_lost / escalated`;
+
+export function getDefaultSystemPrompt(): string {
+  return DEFAULT_SYSTEM_PROMPT;
+}
 
 export function getSystemPrompt(): string {
   const custom = getSetting('bot_system_prompt');
   const products = getSetting('bot_products_catalog');
   const company = getSetting('bot_company_name');
+  const uploadLink = getSetting('bot_upload_link');
   let prompt = custom || DEFAULT_SYSTEM_PROMPT;
   if (company && !custom) {
-    prompt = prompt.replace('a premium business solutions company', company);
+    prompt = prompt.replace(/Nationwide Advance/g, company);
   }
+
   if (products) {
     prompt += `\n\nAdditional product info:\n${products}`;
+  }
+  if (uploadLink) {
+    prompt += `\n\nSecure upload link for application + 4-month bank statements:\n${uploadLink}\nShare this link when pushing docs.`;
+  } else {
+    prompt += `\n\nNo upload link is configured yet. When they are ready for docs, ask them to reply YES and say a specialist will text the secure upload link.`;
   }
   return prompt;
 }
 
 const DEMO_RESPONSES: Record<string, string[]> = {
   greeting: [
-    "Hi! I'm from the sales team. Thanks for your interest! What brought you to us today?",
-    "Hello! Great to connect. I'm here to help find the perfect solution for your business. What's your biggest challenge right now?",
+    "Hey! Thanks again for applying with Nationwide Advance — ready to send in the application and your recent 4-month bank statements?",
+    "Thanks for trusting us with your financing needs. Want me to send the upload link for your app and last 4 months of bank statements?",
   ],
   pricing: [
-    "Our Starter Plan begins at $299/mo. Would you like me to walk you through what's included?",
-    "We have packages from $299 to $999/mo depending on your needs. What's your team size?",
+    "Our rates and terms depend on many qualifying factors, but we strive to deliver the best results on both. Ready to upload your recent 4-month bank statements so we can review?",
+    "Happy to help on rates — they depend on qualifying factors. Best next step is the application plus your last 4 months of bank statements on the upload link.",
   ],
   interest: [
-    "That's exactly what we help with! Many clients saw 40% efficiency gains. Can I schedule a quick demo?",
-    "Perfect fit! Our Professional Plan could transform your workflow. When's a good time to chat more?",
+    "Awesome — next step is the application and your recent 4-month bank statements on the upload link. Want me to send that now?",
+    "Perfect. Reply YES and I'll get you the secure upload link for the application and last 4 months of statements.",
+  ],
+  not_interested: [
+    "May I ask why you applied just now on our site if you were not interested? Has something steered you in a different direction?",
+  ],
+  call_later: [
+    "Of course — what time works best, and is this the best number to reach you on?",
+  ],
+  competitor: [
+    "Great — shopping around is always a smart business decision. Was there a specified goal that wasn't met with the other finance company?",
   ],
   objection: [
-    "I totally understand budget concerns. We offer flexible plans and most clients see ROI within 3 months. Want details?",
-    "Fair point! Let me connect you with our team lead who can discuss custom pricing. One moment!",
+    "Totally fair. Want me to send the upload link anyway so you have options if you decide to move forward?",
   ],
   default: [
-    "Great question! Let me help with that. What's most important to you - automation, analytics, or full enterprise support?",
-    "I'd love to learn more about your needs. What industry are you in?",
-    "Thanks for sharing! Based on that, I think our Starter Plan could be a great fit. Interested in a free trial?",
+    "Got it. Whenever you're ready, the fastest path is the application plus your recent 4-month bank statements on the upload link.",
+    "Appreciate that — want me to send the secure upload link for the app and last 4 months of bank statements?",
   ],
   escalate: [
-    "Absolutely, I'll connect you with a team member right away. Someone will reach out shortly!",
+    "Absolutely — I'll connect you with a Nationwide Advance specialist now. Someone from the team will follow up shortly!",
   ],
 };
 
 function isDemoMode(): boolean {
+  // Explicit env wins over DB (so .env DEMO_MODE=false enables real OpenAI)
+  if (process.env.DEMO_MODE === 'false') return false;
+  if (process.env.DEMO_MODE === 'true') return true;
   const demoSetting = getSetting('demo_mode');
   if (demoSetting !== null) return demoSetting === 'true';
-  return process.env.DEMO_MODE !== 'false';
+  return true;
 }
 
 function getOpenAIKey(): string | null {
@@ -72,21 +116,41 @@ function getOpenAIKey(): string | null {
 
 export function analyzeSentiment(text: string): 'positive' | 'neutral' | 'negative' | 'frustrated' {
   const lower = text.toLowerCase();
-  if (/\b(angry|frustrated|terrible|awful|hate|worst|useless|scam)\b/.test(lower)) return 'frustrated';
-  if (/\b(no|not interested|stop|unsubscribe|leave me alone|don't contact)\b/.test(lower)) return 'negative';
-  if (/\b(yes|great|awesome|perfect|love|interested|sounds good|let's do it|sign me up)\b/.test(lower)) return 'positive';
+  if (/\b(angry|frustrated|terrible|awful|hate|worst|useless|scam|pissed|ridiculous)\b/.test(lower)) {
+    return 'frustrated';
+  }
+  if (/\b(stop|unsubscribe|leave me alone|don't (text|contact|message)|remove me)\b/.test(lower)) {
+    return 'negative';
+  }
+  if (/\b(not interested)\b/.test(lower)) return 'negative';
+  if (/\b(yes|great|awesome|perfect|love|interested|sounds good|let's do it|sign me up|ready)\b/.test(lower)) {
+    return 'positive';
+  }
   return 'neutral';
 }
 
 export function shouldEscalate(text: string, sentiment: string): { escalate: boolean; reason?: string } {
   const lower = text.toLowerCase();
-  if (/\b(speak to (a )?(human|person|agent|manager|someone)|talk to (a )?(human|person|real)|call me|not a bot)\b/.test(lower)) {
+
+  // STOP / opt-out → escalate so team can suppress
+  if (/\b(stop|unsubscribe|remove me|don't (text|contact|message) me)\b/.test(lower)) {
+    return { escalate: true, reason: 'Lead opted out / STOP request' };
+  }
+
+  // Explicit human request — NOT mere "call me later"
+  if (
+    /\b(speak|talk|connect me)\b.{0,40}\b(human|person|agent|manager|someone|rep|specialist|keith)\b/.test(lower) ||
+    /\b(real person|live (person|agent|human)|actual (person|human)|not a bot)\b/.test(lower) ||
+    /\b(can i (get|have) (a )?(human|person|agent))\b/.test(lower) ||
+    /\b(transfer me|hand ?off|get (me )?keith)\b/.test(lower)
+  ) {
     return { escalate: true, reason: 'Lead requested human agent' };
   }
+
   if (sentiment === 'frustrated') {
-    return { escalate: true, reason: 'Negative sentiment detected' };
+    return { escalate: true, reason: 'Merchant upset / negative sentiment' };
   }
-  if (/\b(lawyer|legal action|sue|complaint|report you)\b/.test(lower)) {
+  if (/\b(lawyer|legal action|sue|complaint|report you|attorney)\b/.test(lower)) {
     return { escalate: true, reason: 'Legal/compliance concern' };
   }
   return { escalate: false };
@@ -97,10 +161,23 @@ function getDemoResponse(inboundText: string): string {
   if (shouldEscalate(inboundText, analyzeSentiment(inboundText)).escalate) {
     return DEMO_RESPONSES.escalate[0];
   }
-  if (/\b(price|cost|how much|pricing|expensive|budget)\b/.test(lower)) {
+  if (/\b(call me|call later|later today|tomorrow|next week)\b/.test(lower)) {
+    return DEMO_RESPONSES.call_later[0];
+  }
+  if (/\b(not interested)\b/.test(lower)) {
+    return DEMO_RESPONSES.not_interested[0];
+  }
+  if (/\b(already (working|have)|other (company|lender|finance)|shopping around)\b/.test(lower)) {
+    return DEMO_RESPONSES.competitor[0];
+  }
+  if (/\b(price|cost|how much|pricing|expensive|budget|rate|factor|terms)\b/.test(lower)) {
     return DEMO_RESPONSES.pricing[Math.floor(Math.random() * DEMO_RESPONSES.pricing.length)];
   }
-  if (/\b(yes|interested|tell me more|sounds good|demo|trial)\b/.test(lower)) {
+  if (/\b(yes|interested|tell me more|sounds good|demo|trial|ready|send (it|the link))\b/.test(lower)) {
+    const upload = getSetting('bot_upload_link');
+    if (upload) {
+      return `Perfect — here's the secure upload link for the application and your recent 4-month bank statements: ${upload}`;
+    }
     return DEMO_RESPONSES.interest[Math.floor(Math.random() * DEMO_RESPONSES.interest.length)];
   }
   if (/\b(no|expensive|can't afford|not sure|maybe later|think about)\b/.test(lower)) {
@@ -121,7 +198,8 @@ export async function generateAIResponse(
 
   if (escalation.escalate) {
     return {
-      response: "I understand you'd like to speak with someone from our team. I'm connecting you with a human agent now — they'll be with you shortly!",
+      response:
+        "Absolutely — I'll connect you with a Nationwide Advance specialist now. Someone from the team will follow up shortly!",
       shouldEscalate: true,
       escalationReason: escalation.reason,
     };
@@ -149,7 +227,7 @@ export async function generateAIResponse(
     const completion = await openai.chat.completions.create({
       model: getSetting('openai_model') || process.env.OPENAI_MODEL || 'gpt-4o-mini',
       messages,
-      max_tokens: 200,
+      max_tokens: 220,
       temperature: 0.7,
     });
 
@@ -157,7 +235,8 @@ export async function generateAIResponse(
 
     if (response.includes('[ESCALATE]')) {
       return {
-        response: "Let me connect you with one of our team members who can help you better. They'll be in touch shortly!",
+        response:
+          "Let me connect you with one of our team members who can help you better. They'll be in touch shortly!",
         shouldEscalate: true,
         escalationReason: 'AI determined escalation needed',
       };
@@ -173,11 +252,22 @@ export async function generateAIResponse(
   }
 }
 
-export function getInitialOutreachMessage(leadName: string): string {
-  const firstName = leadName.split(' ')[0];
-  const template = getSetting('bot_outreach_template');
-  if (template) {
-    return template.replace(/\{firstName\}/g, firstName).replace(/\{name\}/g, leadName);
-  }
-  return `Hi ${firstName}! I'm your AI sales assistant. I noticed you recently showed interest in our business solutions. I'd love to help you find the perfect fit. What challenges are you looking to solve?`;
+export function getInitialOutreachMessage(
+  leadName: string,
+  extras?: { fundingNeed?: string; monthlyRevenue?: string; fundingAmount?: string }
+): string {
+  const firstName = leadName.split(' ')[0] || leadName;
+  const fundingNeed =
+    extras?.fundingNeed ||
+    extras?.fundingAmount ||
+    extras?.monthlyRevenue ||
+    'business financing';
+
+  const template = getSetting('bot_outreach_template') || DEFAULT_OUTREACH_TEMPLATE;
+  return template
+    .replace(/\{firstName\}/g, firstName)
+    .replace(/\{name\}/g, leadName)
+    .replace(/\{fundingNeed\}/g, fundingNeed)
+    .replace(/\{fundingAmount\}/g, extras?.fundingAmount || fundingNeed)
+    .replace(/\{monthlyRevenue\}/g, extras?.monthlyRevenue || fundingNeed);
 }

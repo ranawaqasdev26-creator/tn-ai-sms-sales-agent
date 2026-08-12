@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- Fully HD Discord-style chat smile (vector, crisp at any size) -->
+  <defs>
+    <linearGradient id="blue" x1="64" y1="48" x2="448" y2="464" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4C6EF5"/>
+      <stop offset="45%" stop-color="#364FC7"/>
+      <stop offset="100%" stop-color="#1B2A6B"/>
+    </linearGradient>
+    <linearGradient id="pink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FF5BA8"/>
+      <stop offset="100%" stop-color="#E0116E"/>
+    </linearGradient>
+    <linearGradient id="fill" x1="96" y1="80" x2="400" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#EEF2FF"/>
+    </linearGradient>
+    <filter id="depth" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#1B2A6B" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <!-- Rounded tile -->
+  <rect width="512" height="512" rx="112" fill="#FFFFFF"/>
+
+  <!-- Bubble body -->
+  <g filter="url(#depth)">
+    <path
+      fill="url(#fill)"
+      stroke="url(#blue)"
+      stroke-width="36"
+      stroke-linejoin="round"
+      d="M148 96
+         h184
+         c58 0 104 46 104 104
+         v112
+         c0 58-46 104-104 104
+         H236
+         l-72 60
+         20-60
+         H148
+         c-58 0-104-46-104-104
+         V200
+         c0-58 46-104 104-104z"
+    />
+  </g>
+
+  <!-- Inner soft highlight (HD polish) -->
+  <path
+    fill="#FFFFFF"
+    opacity="0.55"
+    d="M168 128
+       h144
+       c36 0 68 22 80 54
+       c-18-28-50-46-88-46
+       H168
+       c-40 0-72 26-80 62
+       c10-34 42-70 80-70z"
+  />
+
+  <!-- Eyes -->
+  <rect x="188" y="188" width="44" height="84" rx="22" fill="url(#pink)"/>
+  <rect x="280" y="188" width="44" height="84" rx="22" fill="url(#pink)"/>
+  <rect x="198" y="200" width="16" height="28" rx="8" fill="#FFC2DE" opacity="0.9"/>
+  <rect x="290" y="200" width="16" height="28" rx="8" fill="#FFC2DE" opacity="0.9"/>
+
+  <!-- Smile -->
+  <path
+    d="M196 318c22 40 98 40 120 0"
+    stroke="url(#blue)"
+    stroke-width="32"
+    stroke-linecap="round"
+    fill="none"
+  />
+</svg>

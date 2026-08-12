@@ -15,8 +15,13 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
   });
   if (res.status === 401) {
+    // Clear session once — do not hard-reload (that caused a login loop on Vercel
+    // when ephemeral SQLite briefly rejected a still-valid JWT across instances).
+    const hadToken = !!localStorage.getItem('sales_agent_token');
     localStorage.removeItem('sales_agent_token');
-    window.location.reload();
+    if (hadToken) {
+      window.dispatchEvent(new Event('sales-agent-auth-expired'));
+    }
     throw new Error('Session expired');
   }
   if (!res.ok) {
@@ -89,15 +94,16 @@ export interface Settings {
   settings: Record<string, string>;
   integrations: {
     openai: boolean;
-    twilio: boolean;
-    ibluesend: boolean;
-    activeMessagingProvider?: string;
+    twilio?: boolean;
+    iblusend?: boolean;
     zoho: boolean;
     email: boolean;
     demoMode: boolean;
     aiPlatform?: string;
     aiModel?: string;
+    messaging?: string;
   };
+
 }
 
 export interface AppNotification {

@@ -13,6 +13,12 @@ export function useWebSocket(onEvent: (event: WSEvent) => void) {
   onEventRef.current = onEvent;
 
   const connect = useCallback(() => {
+    // Vercel serverless has no WebSocket — dashboard falls back to polling
+    if (import.meta.env.PROD && !window.location.hostname.includes('localhost')) {
+      setConnected(false);
+      return;
+    }
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
     const ws = new WebSocket(`${protocol}//${host}/ws`);
@@ -39,3 +45,4 @@ export function useWebSocket(onEvent: (event: WSEvent) => void) {
 
   return { connected };
 }
+

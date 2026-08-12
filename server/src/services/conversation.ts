@@ -12,7 +12,7 @@ import {
   assignConversation,
 } from '../models/repository.js';
 import { generateAIResponse, analyzeSentiment, getInitialOutreachMessage } from './ai.js';
-import { sendMessage } from './messaging/index.js';
+import { sendOutboundMessage } from './messaging.js';
 import { syncLeadToZoho, notifyZohoConversationEvent } from './zoho.js';
 import { createNotification } from './notifications.js';
 import { sendEscalationEmail } from './email.js';
@@ -89,15 +89,30 @@ export async function handleInboundSMS(phone: string, body: string, leadName?: s
       assigned_agent: 'Pending Assignment',
     });
     logEvent('escalation', conversation.id, lead.id, { reason: aiResult.escalationReason });
-    broadcast('escalation', { conversationId: conversation.id, reason: aiResult.escalationReason });
+    broadcast('escalation', {
+      conversationId: conversation.id,
+      reason: aiResult.escalationReason,
+      leadName: lead.name,
+      phone: lead.phone,
+    });
+
     await notifyZohoConversationEvent(lead.id, 'escalation', {
       leadName: lead.name,
       message: body,
       reason: aiResult.escalationReason,
     });
     await notifyInApp('escalation', 'Escalation Required', `${lead.name}: ${aiResult.escalationReason}`, conversation.id, lead.id);
-    await sendEscalationEmail(lead.name, aiResult.escalationReason ?? 'Auto-escalation', conversation.id);
+    void sendEscalationEmail({
+      leadName: lead.name,
+      phone: lead.phone,
+      reason: aiResult.escalationReason ?? 'Lead requested human agent',
+      message: body,
+      conversationId: conversation.id,
+    }).then((emailResult) => {
+      broadcast('escalation_email', emailResult);
+    });
   }
+
 
   const outboundMsg = addMessage({
     conversationId: conversation.id,
@@ -106,7 +121,10 @@ export async function handleInboundSMS(phone: string, body: string, leadName?: s
     body: aiResult.response,
   });
 
-  await sendMessage(phone, aiResult.response);
+  await sendOutboundMessage(phone, aiResult.response, {
+    sendMode: 'instant',
+    idempotencyKey: `ai_${conversation.id}_${inboundMsg.id}`,
+  });
 
   broadcast('message', { conversationId: conversation.id, message: outboundMsg });
   broadcast('conversation_updated', { conversationId: conversation.id });
@@ -131,8 +149,12 @@ export async function sendHumanReply(conversationId: string, body: string, agent
     last_message_at: new Date().toISOString(),
   });
 
-  await sendMessage(conversation.lead_phone, body);
+  await sendOutboundMessage(conversation.lead_phone, body, {
+    sendMode: 'instant',
+    idempotencyKey: `human_${conversationId}_${msg.id}`,
+  });
   logEvent('human_reply', conversationId, conversation.lead_id, { agent: agentName });
+
 
   broadcast('message', { conversationId, message: msg });
   broadcast('conversation_updated', { conversationId });
@@ -272,9 +294,26 @@ export async function triggerNewLeadOutreach(
   let lead = getLeadByPhone(phone);
   if (!lead) {
     lead = createLead({ name, phone, email, company, source: 'zoho', zoho_id: zohoId });
-  } else if (zohoId) {
-    updateLead(lead.id, { zoho_id: zohoId });
-    lead = getLeadByPhone(phone)!;
+  } else {
+    const patch: Record<string, string> = {};
+    if (zohoId) patch.zoho_id = zohoId;
+    if (email) patch.email = email;
+    if (company) patch.company = company;
+    if (name) patch.name = name;
+    if (Object.keys(patch).length) {
+      updateLead(lead.id, patch);
+      lead = getLeadByPhone(phone)!;
+    }
+  }
+
+  const existing = getActiveConversationForLead(lead.id);
+  if (existing) {
+    return {
+      lead,
+      conversation: existing,
+      skipped: true,
+      reason: 'active_conversation_exists',
+    };
   }
 
   const conversation = createConversation(lead.id);
@@ -287,7 +326,10 @@ export async function triggerNewLeadOutreach(
     body: message,
   });
 
-  await sendMessage(phone, message);
+  await sendOutboundMessage(phone, message, {
+    sendMode: 'instant',
+    idempotencyKey: `outreach_${lead.id}_${conversation.id}`,
+  });
   logEvent('outreach_sent', conversation.id, lead.id);
   broadcast('message', { conversationId: conversation.id, message: msg });
   broadcast('conversation_updated', { conversationId: conversation.id });
@@ -295,7 +337,7 @@ export async function triggerNewLeadOutreach(
   await notifyZohoConversationEvent(lead.id, 'conversation_started', { leadName: name, message });
   await notifyInApp('outreach', 'Outreach Sent', `AI contacted ${name}`, conversation.id, lead.id);
 
-  return { lead, conversation, message: msg };
+  return { lead, conversation, message: msg, skipped: false };
 }
 
 function sleep(ms: number) {

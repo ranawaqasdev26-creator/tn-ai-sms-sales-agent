@@ -65,7 +65,7 @@ export function getAllConversations(requester: RequestingAgent): ConversationWit
     JOIN leads l ON l.id = c.lead_id
     ${ownershipFilter}
     ORDER BY c.last_message_at DESC
-  `).all(...(requester.role === 'admin' ? [] : [requester.id])) as ConversationWithLead[];
+  `).all(...(requester.role === 'admin' ? [] : [requester.id])) as unknown as ConversationWithLead[];
 }
 
 export function getConversationById(id: string): ConversationWithLead | undefined {
@@ -76,7 +76,7 @@ export function getConversationById(id: string): ConversationWithLead | undefine
     FROM conversations c
     JOIN leads l ON l.id = c.lead_id
     WHERE c.id = ?
-  `).get(id) as ConversationWithLead | undefined;
+  `).get(id) as unknown as ConversationWithLead | undefined;
 }
 
 export function canAccessConversation(conversation: ConversationWithLead, requester: RequestingAgent): boolean {
@@ -85,7 +85,7 @@ export function canAccessConversation(conversation: ConversationWithLead, reques
 }
 
 export function getMessages(conversationId: string): Message[] {
-  return db.prepare('SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC').all(conversationId) as Message[];
+  return db.prepare('SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC').all(conversationId) as unknown as Message[];
 }
 
 export function createLead(data: { name: string; phone: string; email?: string; company?: string; zoho_id?: string; source?: string }): Lead {
@@ -94,13 +94,13 @@ export function createLead(data: { name: string; phone: string; email?: string; 
     INSERT INTO leads (id, name, phone, email, company, zoho_id, source)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(id, data.name, data.phone, data.email ?? null, data.company ?? null, data.zoho_id ?? null, data.source ?? 'manual');
-  return db.prepare('SELECT * FROM leads WHERE id = ?').get(id) as Lead;
+  return db.prepare('SELECT * FROM leads WHERE id = ?').get(id) as unknown as Lead;
 }
 
 export function createConversation(leadId: string): Conversation {
   const id = uuid();
   db.prepare('INSERT INTO conversations (id, lead_id) VALUES (?, ?)').run(id, leadId);
-  return db.prepare('SELECT * FROM conversations WHERE id = ?').get(id) as Conversation;
+  return db.prepare('SELECT * FROM conversations WHERE id = ?').get(id) as unknown as Conversation;
 }
 
 export function addMessage(data: {
@@ -118,7 +118,7 @@ export function addMessage(data: {
 
   db.prepare(`UPDATE conversations SET last_message_at = datetime('now') WHERE id = ?`).run(data.conversationId);
 
-  return db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as Message;
+  return db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as unknown as Message;
 }
 
 export function updateConversation(id: string, updates: Partial<Conversation>) {
@@ -134,7 +134,7 @@ export function updateConversation(id: string, updates: Partial<Conversation>) {
 
   if (fields.length === 0) return;
   values.push(id);
-  db.prepare(`UPDATE conversations SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  db.prepare(`UPDATE conversations SET ${fields.join(', ')} WHERE id = ?`).run(...(values as (string | number | null)[]));
 }
 
 export function logEvent(eventType: string, conversationId?: string, leadId?: string, metadata?: Record<string, unknown>) {
@@ -220,15 +220,15 @@ export function getAllLeads(requester: RequestingAgent): LeadWithStatus[] {
     FROM leads l
     ${ownershipFilter}
     ORDER BY l.created_at DESC
-  `).all(...(requester.role === 'admin' ? [] : [requester.id])) as LeadWithStatus[];
+  `).all(...(requester.role === 'admin' ? [] : [requester.id])) as unknown as LeadWithStatus[];
 }
 
 export function getLeadByPhone(phone: string): Lead | undefined {
-  return db.prepare('SELECT * FROM leads WHERE phone = ?').get(phone) as Lead | undefined;
+  return db.prepare('SELECT * FROM leads WHERE phone = ?').get(phone) as unknown as Lead | undefined;
 }
 
 export function getLeadById(id: string): Lead | undefined {
-  return db.prepare('SELECT * FROM leads WHERE id = ?').get(id) as Lead | undefined;
+  return db.prepare('SELECT * FROM leads WHERE id = ?').get(id) as unknown as Lead | undefined;
 }
 
 export function updateLead(id: string, updates: Partial<Lead>) {
@@ -243,7 +243,7 @@ export function updateLead(id: string, updates: Partial<Lead>) {
   if (fields.length === 0) return;
   fields.push("updated_at = datetime('now')");
   values.push(id);
-  db.prepare(`UPDATE leads SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  db.prepare(`UPDATE leads SET ${fields.join(', ')} WHERE id = ?`).run(...(values as (string | number | null)[]));
 }
 
 export function assignConversation(conversationId: string, agentId: string | null, agentName: string | null) {
@@ -256,5 +256,5 @@ export function getActiveConversationForLead(leadId: string): Conversation | und
   return db.prepare(`
     SELECT * FROM conversations WHERE lead_id = ? AND status IN ('active', 'escalated', 'paused')
     ORDER BY created_at DESC LIMIT 1
-  `).get(leadId) as Conversation | undefined;
+  `).get(leadId) as unknown as Conversation | undefined;
 }
